@@ -30,6 +30,7 @@ wheels/
 .env
 .env.local
 .env.*.local
+backend/.env
 
 # IDE
 .vscode/
@@ -58,3 +59,9 @@ backend/chroma_db/
 # Uploads
 uploads/
 backend/uploads/
+
+# Input docs (user documents, screenshots, etc.)
+input-docs/
+
+# Root package-lock.json (use frontend/package-lock.json)
+package-lock.json
