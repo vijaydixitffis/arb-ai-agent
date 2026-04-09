@@ -228,5 +228,185 @@ class MarkdownPrincipleParser:
         return weights
 
 
-# Global instance
+class MarkdownStandardParser:
+    """Parser for extracting structured standards from markdown files"""
+    
+    def __init__(self):
+        self.standard_pattern = re.compile(r'### ([A-Z]+-STD-\d+)\s*—\s*(.+)')
+    
+    def parse_file(self, file_path: str) -> List[Dict[str, Any]]:
+        """
+        Parse a markdown file and extract structured standards.
+        
+        Args:
+            file_path: Path to the markdown file
+            
+        Returns:
+            List of standard dictionaries with keys:
+            - id: Standard ID (e.g., B-STD-01)
+            - title: Standard title
+            - purpose_scope: Purpose-Scope text
+            - standard: The Standard text
+            - rationale_context: Rationale-Context text
+            - compliance_governance: Compliance-Governance text
+            - domain: Domain inferred from ID prefix
+        """
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return self.parse_content(content)
+    
+    def parse_content(self, content: str) -> List[Dict[str, Any]]:
+        """
+        Parse markdown content and extract structured standards.
+        
+        Args:
+            content: Markdown content as string
+            
+        Returns:
+            List of standard dictionaries
+        """
+        standards = []
+        sections = self._split_into_sections(content)
+        
+        for section in sections:
+            standard = self._parse_standard_section(section)
+            if standard:
+                standards.append(standard)
+        
+        return standards
+    
+    def _split_into_sections(self, content: str) -> List[str]:
+        """Split content into standard sections based on ### headers"""
+        # Split by ### headers
+        sections = re.split(r'\n###\s', content)
+        
+        # Filter out empty sections and the header/intro
+        filtered_sections = []
+        for section in sections:
+            section = section.strip()
+            if section and not section.startswith('#'):
+                # Add the ### back for consistency
+                section = '### ' + section
+                filtered_sections.append(section)
+        
+        return filtered_sections
+    
+    def _parse_standard_section(self, section: str) -> Optional[Dict[str, Any]]:
+        """Parse a single standard section"""
+        lines = section.split('\n')
+        
+        # Extract standard ID and title from first line
+        first_line = lines[0].strip()
+        match = self.standard_pattern.match(first_line)
+        if not match:
+            return None
+        
+        standard_id = match.group(1)
+        title = match.group(2)
+        
+        # Parse the content
+        purpose_scope = ""
+        standard_text = ""
+        rationale_context = ""
+        compliance_governance = []
+        
+        current_section = None
+        current_content = []
+        
+        for line in lines[1:]:
+            line = line.strip()
+            
+            # Check for section headers
+            if line.startswith('**Purpose-Scope**'):
+                if current_section:
+                    purpose_scope, standard_text, rationale_context, compliance_governance = self._process_current_section(
+                        current_section, current_content, purpose_scope, standard_text, rationale_context, compliance_governance
+                    )
+                current_section = 'purpose_scope'
+                current_content = []
+            elif line.startswith('**The Standard**'):
+                if current_section:
+                    purpose_scope, standard_text, rationale_context, compliance_governance = self._process_current_section(
+                        current_section, current_content, purpose_scope, standard_text, rationale_context, compliance_governance
+                    )
+                current_section = 'standard'
+                current_content = []
+            elif line.startswith('**Rationale-Context**'):
+                if current_section:
+                    purpose_scope, standard_text, rationale_context, compliance_governance = self._process_current_section(
+                        current_section, current_content, purpose_scope, standard_text, rationale_context, compliance_governance
+                    )
+                current_section = 'rationale_context'
+                current_content = []
+            elif line.startswith('**Compliance-Governance**'):
+                if current_section:
+                    purpose_scope, standard_text, rationale_context, compliance_governance = self._process_current_section(
+                        current_section, current_content, purpose_scope, standard_text, rationale_context, compliance_governance
+                    )
+                current_section = 'compliance_governance'
+                current_content = []
+            elif line.startswith('---'):
+                # Section separator, ignore
+                continue
+            elif line:
+                # Content line
+                current_content.append(line)
+        
+        # Process the last section
+        if current_section:
+            purpose_scope, standard_text, rationale_context, compliance_governance = self._process_current_section(
+                current_section, current_content, purpose_scope, standard_text, rationale_context, compliance_governance
+            )
+        
+        # Determine domain from standard ID
+        domain = self._infer_domain(standard_id)
+        
+        return {
+            'id': standard_id,
+            'title': title,
+            'purpose_scope': purpose_scope,
+            'standard': standard_text,
+            'rationale_context': rationale_context,
+            'compliance_governance': compliance_governance,
+            'domain': domain
+        }
+    
+    def _process_current_section(self, section: str, content: List[str],
+                                  purpose_scope: str, standard_text: str,
+                                  rationale_context: str, compliance_governance: List[str]) -> tuple:
+        """Process accumulated content for a section and return updated values"""
+        
+        if section == 'purpose_scope':
+            purpose_scope = ' '.join(content).strip()
+        elif section == 'standard':
+            # Join bullet points with newlines for better formatting
+            standard_text = '\n'.join(content).strip()
+        elif section == 'rationale_context':
+            rationale_context = ' '.join(content).strip()
+        elif section == 'compliance_governance':
+            # Split by bullet points
+            for line in content:
+                line = line.strip()
+                if line.startswith('-'):
+                    compliance_governance.append(line[1:].strip())
+        
+        return purpose_scope, standard_text, rationale_context, compliance_governance
+    
+    def _infer_domain(self, standard_id: str) -> str:
+        """Infer domain from standard ID prefix"""
+        prefix = standard_id.split('-')[0]
+        
+        domain_map = {
+            'B': 'Business',
+            'D': 'Data',
+            'A': 'Application',
+            'T': 'Technology'
+        }
+        
+        return domain_map.get(prefix, 'General')
+
+
+# Global instances
 markdown_parser = MarkdownPrincipleParser()
+standards_parser = MarkdownStandardParser()

@@ -22,6 +22,16 @@ class DomainValidationAgent:
             "infrastructure": ["Infrastructure", "Operations"],
             "devsecops": ["Governance", "Operations", "Software"]
         }
+        
+        # Map domain names to standard domains for filtering
+        self.domain_to_standards = {
+            "application": "Application",
+            "integration": "Application",
+            "data": "Data",
+            "security": "Technology",
+            "infrastructure": "Technology",
+            "devsecops": "Technology"
+        }
     
     async def validate_domain(
         self,
@@ -37,8 +47,11 @@ class DomainValidationAgent:
         # Retrieve principles from knowledge base
         principles = self._retrieve_principles(domain, section_data)
         
-        # Build prompt with principles and checklist
-        prompt = self._build_validation_prompt(domain, principles, checklist_items, section_data)
+        # Retrieve standards from knowledge base
+        standards = self._retrieve_standards(domain, section_data)
+        
+        # Build prompt with principles, standards, and checklist
+        prompt = self._build_validation_prompt(domain, principles, standards, checklist_items, section_data)
         
         # Get LLM response
         response = await self.llm.ainvoke(prompt)
@@ -100,10 +113,50 @@ class DomainValidationAgent:
         
         return unique_principles
     
+    def _retrieve_standards(self, domain: str, section_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Retrieve relevant standards from knowledge base"""
+        # Get standard domain for this domain
+        standard_domain = self.domain_to_standards.get(domain, None)
+        
+        if not standard_domain:
+            return []
+        
+        # Build query based on domain and section data
+        query = f"{domain} architecture standards compliance"
+        
+        # Add section-specific terms to query
+        if "integration" in domain.lower():
+            query += " API gateway mediation file transfer message broker"
+        elif "security" in domain.lower():
+            query += " authentication authorization encryption security"
+        elif "data" in domain.lower():
+            query += " data classification lineage governance"
+        elif "infrastructure" in domain.lower():
+            query += " infrastructure scalability reliability cloud"
+        
+        # Query knowledge base for standards
+        standards = knowledge_base_service.query_standards(
+            domain=standard_domain,
+            query=query,
+            n_results=5  # Get top 5 standards
+        )
+        
+        # Deduplicate by standard_id
+        seen_ids = set()
+        unique_standards = []
+        for standard in standards:
+            standard_id = standard.get("metadata", {}).get("standard_id")
+            if standard_id and standard_id not in seen_ids:
+                seen_ids.add(standard_id)
+                unique_standards.append(standard)
+        
+        return unique_standards
+    
     def _build_validation_prompt(
         self,
         domain: str,
         principles: List[Dict[str, Any]],
+        standards: List[Dict[str, Any]],
         checklist_items: List[Dict[str, Any]],
         section_data: Dict[str, Any]
     ) -> str:
@@ -120,6 +173,18 @@ class DomainValidationAgent:
             
             principles_text += f"\n{i}. Principle {principle_id}: {title} (ARB Weight: {arb_weight})\n"
             principles_text += f"   {text}\n"
+        
+        # Format standards for prompt
+        standards_text = ""
+        for i, standard in enumerate(standards[:10], 1):  # Limit to top 10 standards
+            metadata = standard.get("metadata", {})
+            standard_id = metadata.get("standard_id", "Unknown")
+            title = metadata.get("title", "Unknown")
+            domain_std = metadata.get("domain", "Unknown")
+            text = standard.get("text", "")
+            
+            standards_text += f"\n{i}. Standard {standard_id}: {title} (Domain: {domain_std})\n"
+            standards_text += f"   {text}\n"
         
         # Format checklist items
         checklist_text = ""
@@ -141,17 +206,21 @@ class DomainValidationAgent:
 Architecture Principles for {domain}:
 {principles_text}
 
+Architecture Standards for {domain}:
+{standards_text}
+
 Checklist Answers Provided:
 {checklist_text}
 {integration_info}
 
 Your task:
-1. Review each checklist item against the architecture principles
+1. Review each checklist item against the architecture principles and standards
 2. Identify gaps or non-compliant areas
-3. For each gap, reference the specific principle ID that is violated
+3. For each gap, reference the specific principle ID and/or standard ID that is violated
 4. Provide specific recommendations for improvement
 5. Rate the overall compliance as: COMPLIANT, PARTIALLY_COMPLIANT, or NON_COMPLIANT
 6. Consider the ARB weight of violated principles (Critical violations should result in NON_COMPLIANT)
+7. Standards are prescriptive requirements - non-compliance with standards should be treated as high severity
 
 Provide your response in the following JSON format:
 {{
@@ -161,13 +230,15 @@ Provide your response in the following JSON format:
     "gaps": [
         {{
             "principle_id": "INT-01",
+            "standard_id": "A-STD-01",
             "description": "Gap description",
             "severity": "Critical|High|Medium|Low"
         }}
     ],
     "recommendations": ["recommendation1", "recommendation2"],
     "evidence_required": ["evidence1", "evidence2"],
-    "violated_principles": ["INT-01", "INT-05"]
+    "violated_principles": ["INT-01", "INT-05"],
+    "violated_standards": ["A-STD-01", "A-STD-02"]
 }}
 """
         return prompt

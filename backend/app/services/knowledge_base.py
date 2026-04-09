@@ -1,5 +1,5 @@
 from app.vector_store.chroma_setup import vector_store
-from app.utils.markdown_parser import markdown_parser
+from app.utils.markdown_parser import markdown_parser, standards_parser
 from typing import List, Dict, Any
 from pathlib import Path
 
@@ -15,6 +15,9 @@ class KnowledgeBaseService:
         
         # Load Integration principles into architecture_principles collection
         self._load_principles_from_markdown("integration-principles.md", "architecture_principles")
+        
+        # Load EA standards into standards_policies collection
+        self._load_standards_from_markdown("ea-standards.md", "standards_policies")
     
     def _load_principles_from_markdown(self, filename: str, collection_name: str):
         """Load principles from a markdown file into a collection"""
@@ -101,6 +104,85 @@ class KnowledgeBaseService:
         if documents:
             self.vector_store.add_documents(collection_name, documents, metadatas, ids)
             print(f"Loaded {len(principles)} principles from {filename} into {collection_name} ({len(documents)} chunks)")
+    
+    def _load_standards_from_markdown(self, filename: str, collection_name: str):
+        """Load standards from a markdown file into a collection"""
+        file_path = self.knowledge_base_path / filename
+        
+        if not file_path.exists():
+            print(f"Warning: {filename} not found at {file_path}")
+            return
+        
+        # Parse the markdown file
+        standards = standards_parser.parse_file(str(file_path))
+        
+        # Create documents and metadata for each standard
+        documents = []
+        metadatas = []
+        ids = []
+        
+        for standard in standards:
+            # Create multiple chunks per standard for better retrieval
+            # Chunk 1: Full standard text
+            full_text = f"Standard {standard['id']}: {standard['title']}\n\n"
+            full_text += f"Purpose-Scope: {standard['purpose_scope']}\n\n"
+            full_text += f"The Standard:\n{standard['standard']}\n\n"
+            full_text += f"Rationale-Context: {standard['rationale_context']}\n\n"
+            full_text += f"Compliance-Governance: {'; '.join(standard['compliance_governance'])}"
+            
+            documents.append(full_text)
+            metadatas.append({
+                "standard_id": standard['id'],
+                "title": standard['title'],
+                "domain": standard['domain'],
+                "section": "full"
+            })
+            ids.append(f"{standard['id']}_full")
+            
+            # Chunk 2: Purpose-Scope + The Standard
+            purpose_standard = f"Standard {standard['id']}: {standard['title']}\n\n"
+            purpose_standard += f"Purpose-Scope: {standard['purpose_scope']}\n\n"
+            purpose_standard += f"The Standard:\n{standard['standard']}"
+            
+            documents.append(purpose_standard)
+            metadatas.append({
+                "standard_id": standard['id'],
+                "title": standard['title'],
+                "domain": standard['domain'],
+                "section": "purpose_standard"
+            })
+            ids.append(f"{standard['id']}_ps")
+            
+            # Chunk 3: The Standard (bullet points)
+            standard_only = f"Standard {standard['id']}: {standard['title']} - Requirements\n\n"
+            standard_only += standard['standard']
+            
+            documents.append(standard_only)
+            metadatas.append({
+                "standard_id": standard['id'],
+                "title": standard['title'],
+                "domain": standard['domain'],
+                "section": "standard"
+            })
+            ids.append(f"{standard['id']}_std")
+            
+            # Chunk 4: Compliance-Governance
+            compliance_text = f"Standard {standard['id']}: {standard['title']} - Compliance Requirements\n\n"
+            compliance_text += "\n".join([f"- {item}" for item in standard['compliance_governance']])
+            
+            documents.append(compliance_text)
+            metadatas.append({
+                "standard_id": standard['id'],
+                "title": standard['title'],
+                "domain": standard['domain'],
+                "section": "compliance"
+            })
+            ids.append(f"{standard['id']}_comp")
+        
+        # Add to vector store
+        if documents:
+            self.vector_store.add_documents(collection_name, documents, metadatas, ids)
+            print(f"Loaded {len(standards)} standards from {filename} into {collection_name} ({len(documents)} chunks)")
     
     def populate_sample_knowledge(self):
         """Populate the knowledge base with sample EA standards (legacy, use populate_from_markdown instead)"""
@@ -227,13 +309,26 @@ class KnowledgeBaseService:
             for i in range(len(results["documents"][0]))
         ]
     
-    def query_standards(self, domain: str, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
-        """Query standards for a specific domain (legacy method)"""
-        collection_name = f"{domain}_architecture"
+    def query_standards(self, domain: str = None, query: str = None, n_results: int = 5) -> List[Dict[str, Any]]:
+        """Query standards from standards_policies collection with optional domain filter"""
+        collection_name = "standards_policies"
         if collection_name not in self.vector_store.collections:
             return []
         
-        results = self.vector_store.query(collection_name, query, n_results)
+        # Build where clause for filtering
+        where = {}
+        if domain:
+            where["domain"] = domain
+        
+        # Default query if not provided
+        if not query:
+            query = "architecture standards"
+        
+        results = self.vector_store.query(collection_name, query, n_results, where)
+        
+        if not results or "documents" not in results or not results["documents"]:
+            return []
+        
         return [
             {
                 "text": results["documents"][0][i],
@@ -242,6 +337,40 @@ class KnowledgeBaseService:
             }
             for i in range(len(results["documents"][0]))
         ]
+    
+    def get_standard_by_id(self, standard_id: str) -> Dict[str, Any]:
+        """Get a specific standard by ID"""
+        collection_name = "standards_policies"
+        if collection_name not in self.vector_store.collections:
+            return None
+        
+        # Query with where clause for standard_id
+        results = self.vector_store.query(
+            collection_name, 
+            f"Standard {standard_id}", 
+            n_results=10,
+            where={"standard_id": standard_id}
+        )
+        
+        if not results or "documents" not in results or not results["documents"]:
+            return None
+        
+        # Return the full standard (the chunk with section="full")
+        for i in range(len(results["documents"][0])):
+            metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+            if metadata.get("section") == "full":
+                return {
+                    "text": results["documents"][0][i],
+                    "metadata": metadata,
+                    "distance": results["distances"][0][i] if results["distances"] else 0
+                }
+        
+        # If no full chunk found, return the first result
+        return {
+            "text": results["documents"][0][0],
+            "metadata": results["metadatas"][0][0] if results["metadatas"] else {},
+            "distance": results["distances"][0][0] if results["distances"] else 0
+        }
     
     def get_principle_by_id(self, collection_name: str, principle_id: str) -> Dict[str, Any]:
         """Get a specific principle by ID"""
