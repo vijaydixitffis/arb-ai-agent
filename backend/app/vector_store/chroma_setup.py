@@ -35,7 +35,10 @@ class ChromaVectorStore:
             try:
                 collection = self.client.get_or_create_collection(
                     name=collection_name,
-                    metadata={"hnsw:space": "cosine"}
+                    metadata={
+                        "hnsw:space": "cosine",
+                        "description": f"Collection for {collection_name}"
+                    }
                 )
                 self.collections[collection_name] = collection
             except Exception as e:
