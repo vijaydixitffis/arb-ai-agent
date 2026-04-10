@@ -1,0 +1,229 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+
+.container { padding: 1rem 0; }
+
+.domain { margin-bottom: 1.5rem; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); overflow: hidden; }
+
+.domain-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; cursor: pointer;
+  background: var(--color-background-secondary);
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  user-select: none;
+}
+.domain-header:hover { background: var(--color-background-tertiary); }
+
+.domain-label { font-size: 14px; font-weight: 500; color: var(--color-text-primary); flex: 1; }
+.domain-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 500; }
+
+.chevron { font-size: 12px; color: var(--color-text-secondary); transition: transform 0.2s; }
+.open .chevron { transform: rotate(90deg); }
+
+.domain-body { display: none; padding: 0; }
+.domain-body.visible { display: block; }
+
+.artefact-row {
+  display: grid;
+  grid-template-columns: 28px 180px 100px 1fr;
+  gap: 0;
+  align-items: start;
+  padding: 10px 16px;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  font-size: 13px;
+}
+.artefact-row:last-child { border-bottom: none; }
+.artefact-row:hover { background: var(--color-background-secondary); }
+
+.col-icon { font-size: 16px; padding-top: 1px; }
+.col-name { font-weight: 500; color: var(--color-text-primary); padding-right: 12px; }
+.col-type { }
+.col-covers { color: var(--color-text-secondary); line-height: 1.5; }
+
+.type-badge {
+  display: inline-block; font-size: 10px; font-weight: 500;
+  padding: 2px 7px; border-radius: 999px;
+  white-space: nowrap;
+}
+.t-doc  { background: #E6F1FB; color: #0C447C; }
+.t-diag { background: #EAF3DE; color: #3B6D11; }
+.t-xls  { background: #FAEEDA; color: #854F0B; }
+.t-deck { background: #EEEDFE; color: #3C3489; }
+.t-log  { background: #FAECE7; color: #993C1D; }
+
+.header-row {
+  display: grid;
+  grid-template-columns: 28px 180px 100px 1fr;
+  gap: 0;
+  padding: 6px 16px;
+  border-bottom: 0.5px solid var(--color-border-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-background-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.25rem; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--color-text-secondary); }
+</style>
+
+<div class="container">
+  <div class="legend">
+    <div class="legend-item"><span class="type-badge t-doc">Doc</span> Document / Report</div>
+    <div class="legend-item"><span class="type-badge t-diag">Diagram</span> Architecture diagram</div>
+    <div class="legend-item"><span class="type-badge t-xls">Sheet</span> Spreadsheet / Register</div>
+    <div class="legend-item"><span class="type-badge t-deck">Deck</span> Presentation</div>
+    <div class="legend-item"><span class="type-badge t-log">Log</span> Log / Tracker</div>
+  </div>
+
+  <div id="domains"></div>
+</div>
+
+<script>
+const data = [
+  {
+    id: "generic",
+    label: "Generic Metrics",
+    color: "#c-gray",
+    badgeClass: "t-doc",
+    artefacts: [
+      { icon: "📄", name: "Architecture Principles Doc", type: "t-doc", covers: "Adherence to architecture principles across Business, App, Data, Tech" },
+      { icon: "📋", name: "RAID Log", type: "t-log", covers: "Risks, Assumptions, Issues, Dependencies and decision logs" },
+      { icon: "📊", name: "TCO / Budget Sheet", type: "t-xls", covers: "Total cost of ownership: dev, maintenance, ops, infra, license; budget alignment & cost optimization opportunities" },
+      { icon: "🗺️", name: "Roadmap Deck", type: "t-deck", covers: "Strategy impact, alignment to target architecture, change in business model and priority" },
+      { icon: "📄", name: "Standards & Policies Doc", type: "t-doc", covers: "Patterns, standards, policies adherence; consolidation and federation decisions" },
+      { icon: "📄", name: "End User Feedback Report", type: "t-doc", covers: "Top 10 end user concerns, wishlist, support ticket and incident analysis" },
+    ]
+  },
+  {
+    id: "business",
+    label: "Business Architecture",
+    badgeClass: "t-doc",
+    artefacts: [
+      { icon: "📄", name: "Business Case / Problem Statement", type: "t-doc", covers: "Why this capability or service exists; business case relevance, entry-exit criteria, product lifecycle" },
+      { icon: "📄", name: "Business Requirements Doc (BRD)", type: "t-doc", covers: "Business use cases and capabilities impacted; growth/change plans; service/contract/functions" },
+      { icon: "🗺️", name: "Domain Model Diagram", type: "t-diag", covers: "Domain model, actors, user groups, systems and entities involved" },
+      { icon: "📊", name: "Business NFRs Register", type: "t-xls", covers: "Security specs (password/expiry/locks), performance & scalability business metrics, continuity, analytics/monetization" },
+      { icon: "🌐", name: "Operating Model Doc", type: "t-doc", covers: "Target operating model, operation time (24/7 etc.), multi-region, multilingual, multi-currency needs" },
+      { icon: "📋", name: "Business Continuity Plan", type: "t-doc", covers: "Continuity plan, reporting and monetization strategy, business change management" },
+    ]
+  },
+  {
+    id: "application",
+    label: "Application Architecture",
+    badgeClass: "t-diag",
+    artefacts: [
+      { icon: "🏗️", name: "HLD / App Architecture Diagram", type: "t-diag", covers: "High-level design: monolith/microservices, technology choices, component relationships, COTS/Bespoke/Legacy" },
+      { icon: "📄", name: "Architecture Decision Records (ADRs)", type: "t-doc", covers: "Technology choices rationale, versioning, backward compatibility, resilience patterns, SBOM" },
+      { icon: "📊", name: "Integration Catalogue (Sheet)", type: "t-xls", covers: "All integrations: provider, consumer, pattern/type/method (API/File/MSG/Event), frequency, data flows, NFRs" },
+      { icon: "🔗", name: "API / Interface Catalog", type: "t-doc", covers: "Interface catalog, events, SLAs, versioning, event schemas, registry, compatibility rules, ordering/replay" },
+      { icon: "📋", name: "Tech Debt Register", type: "t-xls", covers: "Any technology debt, EoL/EoS of libraries and platforms, planned upgrades, license expiry" },
+      { icon: "📄", name: "Runbooks & Ops Docs", type: "t-doc", covers: "Documentation currency: runbooks, diagrams, ownership; monitoring & alerting configuration" },
+    ]
+  },
+  {
+    id: "nfr",
+    label: "NFRs – Quality of Service",
+    badgeClass: "t-xls",
+    artefacts: [
+      { icon: "📊", name: "NFR Requirements Sheet", type: "t-xls", covers: "Scalability: users, YoY growth, concurrent users, TPS/API calls, response time targets, batch jobs" },
+      { icon: "📊", name: "HA & DR Plan", type: "t-doc", covers: "Single points of failure, HA tier (4/5 nines), failover, DR strategy, RPO/RTO, self-healing, cache sync" },
+      { icon: "📊", name: "Security Controls Register", type: "t-xls", covers: "AuthN/AuthZ, RBAC/IAM, Key Vault, PKI/Encryption, VAPT, endpoint protection, legal compliance" },
+      { icon: "📈", name: "Performance Baseline Report", type: "t-doc", covers: "Baseline TPS, response times, peak-off-peak load profiles, long-running use case behaviour" },
+    ]
+  },
+  {
+    id: "data",
+    label: "Data Architecture",
+    badgeClass: "t-diag",
+    artefacts: [
+      { icon: "🗄️", name: "Data Architecture Diagram", type: "t-diag", covers: "Data flow, data sources, data model documentation, technology stack" },
+      { icon: "📊", name: "Data Classification Register", type: "t-xls", covers: "Data classification, ownership, data usage/management RnR, data lifecycle" },
+      { icon: "📄", name: "Data Governance Doc", type: "t-doc", covers: "EoS/EoL for data platforms, version upgrades, platform upgrade plans" },
+    ]
+  },
+  {
+    id: "infra",
+    label: "Infra-Technology Architecture",
+    badgeClass: "t-diag",
+    artefacts: [
+      { icon: "🏗️", name: "Infra Architecture Diagram", type: "t-diag", covers: "Environments, platforms, runtimes, compute/storage/network topology, IaaC design" },
+      { icon: "📊", name: "Capacity Plan (Sheet)", type: "t-xls", covers: "Demand & capacity requirements, YoY growth, bandwidth adequacy for compute, storage and network" },
+      { icon: "📊", name: "Platform Lifecycle Register", type: "t-xls", covers: "Platform upgrades, EoS/EoL tracking for all infra components" },
+      { icon: "📄", name: "Infra Security Controls Doc", type: "t-doc", covers: "AuthZ, RBAC, Key Vault, PKI, VAPT, endpoint protection, standards and legal compliance" },
+      { icon: "📋", name: "Automation & IaaC Runbook", type: "t-doc", covers: "Automation config, IaaC templates, monitoring/alerting, scheduled jobs/batches, distributed cache config" },
+    ]
+  },
+  {
+    id: "devsecops",
+    label: "Engineering & DevSecOps",
+    badgeClass: "t-log",
+    artefacts: [
+      { icon: "🔄", name: "CI-CD Pipeline Diagram", type: "t-diag", covers: "CI-CD pipeline design, toolset, branching strategy, deployment strategy & release management, IaaC" },
+      { icon: "📊", name: "DevOps Metrics Dashboard / Sheet", type: "t-xls", covers: "12-factor compliance, build/deploy metrics, identity access, secrets & config mgmt, templatization" },
+      { icon: "📋", name: "Threat Model Document", type: "t-doc", covers: "Threat models and mitigations, SAST/DAST results, VAPT findings, environments hardening, SW hardening" },
+      { icon: "📊", name: "SW Quality Metrics Report", type: "t-xls", covers: "Static code analysis results, LLD/code review findings, test plans, defect tracking, automation/API/perf testing, SW quality metrics" },
+      { icon: "📄", name: "Secure Code Review Report", type: "t-doc", covers: "Secure code reviews, SAST, DAST, VAPT, environments and SW hardening status" },
+    ]
+  }
+];
+
+function renderDomain(d) {
+  const div = document.createElement('div');
+  div.className = 'domain';
+
+  const header = document.createElement('div');
+  header.className = 'domain-header';
+  header.innerHTML = `
+    <span class="chevron">▶</span>
+    <span class="domain-label">${d.label}</span>
+    <span class="type-badge ${d.badgeClass}">${d.artefacts.length} artefacts</span>
+  `;
+
+  const body = document.createElement('div');
+  body.className = 'domain-body';
+
+  const headerRow = document.createElement('div');
+  headerRow.className = 'header-row';
+  headerRow.innerHTML = '<span></span><span>Artefact</span><span>Type</span><span>What it covers</span>';
+  body.appendChild(headerRow);
+
+  d.artefacts.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'artefact-row';
+    row.innerHTML = `
+      <span class="col-icon">${a.icon}</span>
+      <span class="col-name">${a.name}</span>
+      <span class="col-type"><span class="type-badge ${a.type}">${typeLabel(a.type)}</span></span>
+      <span class="col-covers">${a.covers}</span>
+    `;
+    body.appendChild(row);
+  });
+
+  header.addEventListener('click', () => {
+    const isOpen = body.classList.toggle('visible');
+    header.classList.toggle('open', isOpen);
+  });
+
+  div.appendChild(header);
+  div.appendChild(body);
+  return div;
+}
+
+function typeLabel(t) {
+  return { 't-doc': 'Doc', 't-diag': 'Diagram', 't-xls': 'Sheet', 't-deck': 'Deck', 't-log': 'Log' }[t] || t;
+}
+
+const container = document.getElementById('domains');
+data.forEach(d => container.appendChild(renderDomain(d)));
+
+// Open first domain by default
+const firstBody = container.querySelector('.domain-body');
+const firstHeader = container.querySelector('.domain-header');
+firstBody.classList.add('visible');
+firstHeader.classList.add('open');
+</script>

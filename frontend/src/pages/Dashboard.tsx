@@ -12,6 +12,9 @@ export default function Dashboard() {
   const [submissions, setSubmissions] = useState<any[]>([])
   const [reviews, setReviews] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [ptxGate, setPtxGate] = useState('')
+  const [architectureDisposition, setArchitectureDisposition] = useState('')
 
   useEffect(() => {
     fetchData()
@@ -164,9 +167,9 @@ export default function Dashboard() {
 
       {isSolutionArchitect && (
         <div className="mb-8">
-          <Button onClick={() => navigate('/submission/new')} className="flex items-center gap-2">
+          <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
             <Plus className="w-4 h-4" />
-            New ARB Submission
+            New EA Review Request
           </Button>
         </div>
       )}
@@ -279,6 +282,68 @@ export default function Dashboard() {
           </Card>
         )}
       </div>
+
+      {/* Modal for New EA Review Request */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">New EA Review Request</h3>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">PTX Gate</label>
+                <select
+                  className="w-full px-3 py-2 border rounded-md"
+                  value={ptxGate}
+                  onChange={(e) => setPtxGate(e.target.value)}
+                >
+                  <option value="">Select PTX Gate</option>
+                  <option value="Permit to Evaluate">Permit to Evaluate</option>
+                  <option value="Permit to Purchase">Permit to Purchase</option>
+                  <option value="Permit to Design">Permit to Design</option>
+                  <option value="Permit to Build">Permit to Build</option>
+                  <option value="Permit to Operate">Permit to Operate</option>
+                  <option value="Permit to Retire">Permit to Retire</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Architecture Disposition</label>
+                <select
+                  className="w-full px-3 py-2 border rounded-md"
+                  value={architectureDisposition}
+                  onChange={(e) => setArchitectureDisposition(e.target.value)}
+                >
+                  <option value="">Select Architecture Disposition</option>
+                  <option value="Architecture Pattern Review">Architecture Pattern Review</option>
+                  <option value="High Bar Review">High Bar Review</option>
+                  <option value="Architecture Review Board">Architecture Review Board</option>
+                  <option value="Change Acceptance Board">Change Acceptance Board</option>
+                  <option value="FastPath">FastPath</option>
+                </select>
+              </div>
+              <Button
+                onClick={() => {
+                  if (ptxGate && architectureDisposition) {
+                    setIsModalOpen(false)
+                    navigate('/submission/new', { state: { ptxGate, architectureDisposition } })
+                  }
+                }}
+                className="w-full"
+                disabled={!ptxGate || !architectureDisposition}
+              >
+                Create Request
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
