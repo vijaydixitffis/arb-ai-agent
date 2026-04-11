@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pre-ARB AI Agent — End-to-End Solution Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:         #f7f8fc;
+    --bg-white:   #ffffff;
+    --bg-soft:    #f0f2f8;
+    --bg-rule:    #e8ecf5;
+    --ink:        #0f1b35;
+    --ink2:       #3a4a6b;
+    --ink3:       #6b7a99;
+    --ink4:       #a0adc4;
+    --blue:       #1a56db;
+    --blue-lt:    #e8f0fe;
+    --cyan:       #0891b2;
+    --cyan-lt:    #e0f5fb;
+    --teal:       #0f7c6a;
+    --teal-lt:    #dcf5f0;
+    --amber:      #b45309;
+    --amber-lt:   #fef3c7;
+    --green:      #166534;
+    --green-lt:   #dcfce7;
+    --red:        #9b1c1c;
+    --red-lt:     #fee2e2;
+    --violet:     #5b21b6;
+    --violet-lt:  #ede9fe;
+    --slate:      #334155;
+    --slate-lt:   #f1f5f9;
+    --shadow-sm:  0 1px 3px rgba(15,27,53,0.08),0 1px 2px rgba(15,27,53,0.04);
+    --shadow-md:  0 4px 12px rgba(15,27,53,0.10),0 2px 4px rgba(15,27,53,0.06);
+    --r: 10px; --rs: 7px;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);font-family:'Plus Jakarta Sans',sans-serif;color:var(--ink);min-height:100vh}
+  body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(circle,rgba(15,27,53,0.055) 1px,transparent 1px);background-size:28px 28px;pointer-events:none;z-index:0}
+  .canvas{position:relative;z-index:1;padding:36px 48px 60px;max-width:1560px;margin:0 auto}
+
+  /* header */
+  .hdr{background:var(--bg-white);border:1px solid var(--bg-rule);border-radius:14px;padding:22px 28px;margin-bottom:24px;box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:space-between;gap:20px}
+  .hdr-brand{display:flex;align-items:center;gap:14px}
+  .hdr-logo{width:46px;height:46px;background:linear-gradient(135deg,var(--blue),var(--cyan));border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:var(--shadow-sm)}
+  .hdr h1{font-size:17px;font-weight:800;color:var(--ink);letter-spacing:-0.02em;line-height:1.2}
+  .hdr h1 span{color:var(--blue)}
+  .hdr-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink3);margin-top:3px;letter-spacing:0.06em}
+  .legend{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .leg{display:flex;align-items:center;gap:5px;background:var(--bg-soft);border:1px solid var(--bg-rule);border-radius:20px;padding:4px 9px;font-size:11px;color:var(--ink2);font-weight:500}
+
+  /* layer wrapper */
+  .layer{display:flex;gap:0;margin-bottom:4px;align-items:stretch;animation:slideUp 0.4s ease both}
+  .ltab{writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--ink4);display:flex;align-items:center;justify-content:center;width:20px;flex-shrink:0}
+
+  /* band */
+  .band{flex:1;background:var(--bg-white);border:1px solid var(--bg-rule);border-radius:var(--r);padding:13px 14px;box-shadow:var(--shadow-sm);position:relative}
+  .bh{display:flex;align-items:center;gap:7px;margin-bottom:11px;padding-bottom:9px;border-bottom:1px solid var(--bg-rule)}
+  .bh-ico{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+  .bt{font-size:11px;font-weight:700}
+  .bs{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--ink3);margin-left:auto;letter-spacing:0.05em}
+  .brow{display:flex;gap:9px;flex-wrap:nowrap}
+
+  /* component */
+  .comp{background:var(--bg-soft);border:1px solid var(--bg-rule);border-radius:var(--rs);padding:10px 11px;flex:1;min-width:0;transition:box-shadow .15s,transform .15s;cursor:default}
+  .comp:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
+  .c-ico{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:7px}
+  .cn{font-size:11.5px;font-weight:700;color:var(--ink);line-height:1.3;margin-bottom:3px}
+  .ct{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--ink3);line-height:1.5}
+  .cb{display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;padding:2px 6px;border-radius:4px;margin-top:6px;letter-spacing:0.04em}
+
+  /* colour variants */
+  .vb{border-left:3px solid var(--blue)}.vb .c-ico{background:var(--blue-lt)}.vb .cb{background:var(--blue-lt);color:var(--blue)}
+  .vc{border-left:3px solid var(--cyan)}.vc .c-ico{background:var(--cyan-lt)}.vc .cb{background:var(--cyan-lt);color:var(--cyan)}
+  .vt{border-left:3px solid var(--teal)}.vt .c-ico{background:var(--teal-lt)}.vt .cb{background:var(--teal-lt);color:var(--teal)}
+  .va{border-left:3px solid var(--amber)}.va .c-ico{background:var(--amber-lt)}.va .cb{background:var(--amber-lt);color:var(--amber)}
+  .vg{border-left:3px solid var(--green)}.vg .c-ico{background:var(--green-lt)}.vg .cb{background:var(--green-lt);color:var(--green)}
+  .vr{border-left:3px solid var(--red)}.vr .c-ico{background:var(--red-lt)}.vr .cb{background:var(--red-lt);color:var(--red)}
+  .vv{border-left:3px solid var(--violet)}.vv .c-ico{background:var(--violet-lt)}.vv .cb{background:var(--violet-lt);color:var(--violet)}
+  .vs{border-left:3px solid var(--slate)}.vs .c-ico{background:var(--slate-lt)}.vs .cb{background:var(--slate-lt);color:var(--slate)}
+  .btb{border-top:3px solid var(--blue)}.btc{border-top:3px solid var(--cyan)}.btt{border-top:3px solid var(--teal)}
+  .bta{border-top:3px solid var(--amber)}.btg{border-top:3px solid var(--green)}.btr{border-top:3px solid var(--red)}
+  .btv{border-top:3px solid var(--violet)}.bts{border-top:3px solid var(--slate)}
+
+  /* flows */
+  .flows{display:flex;align-items:center;padding:0 34px;height:30px;margin:1px 0}
+  .fi{flex:1;display:flex;flex-direction:column;align-items:center}
+  .fi span{font-family:'JetBrains Mono',monospace;font-size:7.5px;color:var(--ink4);letter-spacing:0.07em;margin-bottom:1px;white-space:nowrap}
+  .fsh{width:1px;height:10px;background:linear-gradient(to bottom,var(--bg-rule),var(--ink4))}
+  .far{width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-top:5px solid var(--ink4)}
+
+  /* orchestrator hero */
+  .orch{background:linear-gradient(135deg,#eef3ff,#e8f5fb);border:2px solid rgba(26,86,219,.18);border-radius:var(--r);padding:14px 16px;text-align:center;flex-shrink:0;width:176px;box-shadow:var(--shadow-md)}
+  .orch .oi{width:48px;height:48px;background:linear-gradient(135deg,var(--blue),var(--cyan));border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 9px;box-shadow:0 4px 12px rgba(26,86,219,.22)}
+  .orch .on{font-size:11.5px;font-weight:800;color:var(--blue);letter-spacing:-0.01em;margin-bottom:4px;line-height:1.2}
+  .orch .os{font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--ink3);line-height:1.5}
+
+  /* HITL */
+  .hitl{background:linear-gradient(135deg,#fffbeb,#fff7ed);border:2px dashed rgba(180,83,9,.4);border-radius:var(--r);padding:13px 14px;flex:1;position:relative}
+  .hitl-lbl{position:absolute;top:-10px;left:14px;background:var(--amber-lt);border:1px solid rgba(180,83,9,.3);border-radius:20px;padding:2px 9px;font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:600;color:var(--amber);letter-spacing:0.1em}
+
+  /* agent grid */
+  .agrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+  .acard{background:var(--bg-soft);border:1px solid var(--bg-rule);border-radius:var(--rs);padding:11px 9px 9px;text-align:center;transition:box-shadow .15s,transform .15s;cursor:default}
+  .acard:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
+  .ai{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:19px;margin:0 auto 6px}
+  .an{font-size:11px;font-weight:700;color:var(--ink);line-height:1.3;margin-bottom:3px}
+  .as{font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--ink3);line-height:1.45}
+
+  /* decision */
+  .dgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:4px}
+  .dbox{border-radius:var(--rs);padding:10px 9px 8px;text-align:center;border:1px solid}
+  .dbox .di{font-size:17px;display:block;margin-bottom:3px}
+  .dbox .dn{font-size:10.5px;font-weight:700}
+  .dbox .ds{font-family:'JetBrains Mono',monospace;font-size:8px;margin-top:3px;line-height:1.4}
+  .dap{background:var(--green-lt);border-color:rgba(22,101,52,.2)}.dap .dn{color:var(--green)}.dap .ds{color:#166534bb}
+  .dco{background:var(--amber-lt);border-color:rgba(180,83,9,.2)}.dco .dn{color:var(--amber)}.dco .ds{color:#b45309bb}
+  .dde{background:var(--blue-lt);border-color:rgba(26,86,219,.2)}.dde .dn{color:var(--blue)}.dde .ds{color:#1a56dbbb}
+  .dre{background:var(--red-lt);border-color:rgba(155,28,28,.2)}.dre .dn{color:var(--red)}.dre .ds{color:#9b1c1cbb}
+
+  /* outputs */
+  .ogrid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+
+  /* metrics */
+  .metrics{display:flex;flex-wrap:wrap;gap:7px;margin-top:18px}
+  .mp{background:var(--bg-white);border:1px solid var(--bg-rule);border-radius:20px;padding:5px 13px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--ink2);display:flex;align-items:center;gap:6px;box-shadow:var(--shadow-sm)}
+  .md{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+
+  /* split */
+  .spl{display:flex;gap:9px;align-items:stretch}
+  .sw{flex:2.2}.sn{flex:1}
+
+  @keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  .layer:nth-child(1){animation-delay:.04s}.layer:nth-child(2){animation-delay:.08s}.layer:nth-child(3){animation-delay:.12s}
+  .layer:nth-child(4){animation-delay:.16s}.layer:nth-child(5){animation-delay:.20s}.layer:nth-child(6){animation-delay:.24s}
+  .layer:nth-child(7){animation-delay:.28s}.layer:nth-child(8){animation-delay:.32s}.layer:nth-child(9){animation-delay:.36s}
+  .layer:nth-child(10){animation-delay:.40s}.layer:nth-child(11){animation-delay:.44s}.layer:nth-child(12){animation-delay:.48s}
+  ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--bg-rule);border-radius:4px}
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- HEADER -->
+  <div class="hdr">
+    <div class="hdr-brand">
+      <div class="hdr-logo">🤖</div>
+      <div>
+        <h1>PRE-ARB <span>AI AGENT</span> — END-TO-END SOLUTION ARCHITECTURE</h1>
+        <div class="hdr-sub">ENTERPRISE ARCHITECTURE &nbsp;·&nbsp; ARCHITECTURE REVIEW BOARD AUTOMATION &nbsp;·&nbsp; MULTI-AGENT PIPELINE</div>
+      </div>
+    </div>
+    <div class="legend">
+      <div class="leg">🔵 Core Agent</div>
+      <div class="leg">🧠 LLM / AI</div>
+      <div class="leg">🗄️ Data / Storage</div>
+      <div class="leg">⭐ Human Gate</div>
+      <div class="leg">📤 Output</div>
+      <div class="leg">🔔 Workflow</div>
+    </div>
+  </div>
+
+  <!-- L1: ACTORS -->
+  <div class="layer">
+    <div class="ltab">Actors</div>
+    <div class="band btb">
+      <div class="bh"><div class="bh-ico" style="background:var(--blue-lt)">👥</div><div class="bt" style="color:var(--blue)">Actors &amp; Entry Channels</div><div class="bs">ENTRY POINTS</div></div>
+      <div class="brow">
+        <div class="comp vb"><div class="c-ico">👷</div><div class="cn">Solution Architect / LOB Owner</div><div class="ct">Submits intake form · uploads artifacts · responds to clarification requests</div><span class="cb">⭐ GATE 1</span></div>
+        <div class="comp vb"><div class="c-ico">🏛️</div><div class="cn">Enterprise Architect (EA)</div><div class="ct">Reviews pre-ARB dossier · accepts or overrides agent decisions · approves</div><span class="cb">⭐ GATE 2</span></div>
+        <div class="comp vb"><div class="c-ico">⚖️</div><div class="cn">ARB Panel Members</div><div class="ct">Voting members · domain reviewers · observers / consumers · decision makers</div><span class="cb">Full ARB</span></div>
+        <div class="comp vv"><div class="c-ico">💬</div><div class="cn">MS Teams Bot</div><div class="ct">Conversational intake &amp; real-time notifications via Teams channel integration</div><span class="cb">Azure Bot SDK</span></div>
+        <div class="comp vv"><div class="c-ico">🌐</div><div class="cn">Intake Web Portal</div><div class="ct">React SPA embedded in ServiceNow portal · dynamic form validation &amp; completeness checks</div><span class="cb">React / ServiceNow</span></div>
+        <div class="comp vv"><div class="c-ico">🎫</div><div class="cn">Jira / ServiceNow Ticket</div><div class="ct">EARR/PTX ticket creation triggers workflow · SLA timer starts immediately on open</div><span class="cb">Workflow Engine</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>HTTPS / REST</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>SSO / RBAC</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Artifact Upload</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Webhook Trigger</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Teams Event</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Ticket API</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L2: SECURITY -->
+  <div class="layer">
+    <div class="ltab">Auth</div>
+    <div class="band btr" style="padding:11px 14px">
+      <div class="bh"><div class="bh-ico" style="background:var(--red-lt)">🔒</div><div class="bt" style="color:var(--red)">Security &amp; Authentication Gateway</div><div class="bs">ALL TRAFFIC PASSES THROUGH</div></div>
+      <div class="brow">
+        <div class="comp vr"><div class="c-ico">🔑</div><div class="cn">Azure AD SSO &amp; RBAC</div><div class="ct">Role-enforced: SA, EA, ARB Reviewer, Observer · OAuth 2.0 / OIDC · All sessions in-tenant</div><span class="cb">Azure Active Directory</span></div>
+        <div class="comp vr"><div class="c-ico">🛡️</div><div class="cn">Azure API Management</div><div class="ct">API gateway · rate limiting · JWT validation · TLS 1.3 · threat protection · audit logging</div><span class="cb">Azure APIM</span></div>
+        <div class="comp vr"><div class="c-ico">🗝️</div><div class="cn">Azure Key Vault</div><div class="ct">Secrets, API keys, certificates · No secrets in code · HSM-backed · Managed identities</div><span class="cb">Key Vault + Managed IDs</span></div>
+        <div class="comp vr"><div class="c-ico">🚫</div><div class="cn">DLP &amp; Data Boundary</div><div class="ct">All data in-tenant · No external exfiltration · PII/classification scanning on all ingested docs</div><span class="cb">Azure Purview / DLP</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>Authenticated Request</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Validated Token</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Role Context</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>In-Tenant Only</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L3: ORCHESTRATOR -->
+  <div class="layer">
+    <div class="ltab">Orchestrate</div>
+    <div class="band btb" style="background:linear-gradient(135deg,#f5f8ff,#f0f8fc)">
+      <div class="bh"><div class="bh-ico" style="background:var(--blue-lt)">🤖</div><div class="bt" style="color:var(--blue)">Orchestration Layer</div><div class="bs">LANGGRAPH · AZURE AI AGENT SERVICE</div></div>
+      <div class="spl">
+        <div class="orch">
+          <div class="oi">🤖</div>
+          <div class="on">ORCHESTRATOR AGENT</div>
+          <div class="os">LangGraph stateful graph<br>State machine · task routing<br>SLA enforcement<br>&amp; HITL checkpoints</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+          <div class="brow">
+            <div class="comp vb"><div class="c-ico">🗺️</div><div class="cn">Workflow State Machine</div><div class="ct">Intake → Parse → Retrieve → Validate → Score → Draft → HITL → Publish</div><span class="cb">LangGraph</span></div>
+            <div class="comp vv"><div class="c-ico">⏱️</div><div class="cn">SLA Timer &amp; Escalation</div><div class="ct">Watches per-stage SLA · auto-escalates stalled reviews to EA via Teams + ServiceNow</div><span class="cb">ServiceNow Flows</span></div>
+            <div class="comp va"><div class="c-ico">🔀</div><div class="cn">Task Router</div><div class="ct">Routes artifacts to domain sub-agents · resolves scoring conflicts · aggregates outputs</div><span class="cb">LangGraph Router</span></div>
+          </div>
+          <div class="brow">
+            <div class="comp vc"><div class="c-ico">📋</div><div class="cn">Session Context Manager</div><div class="ct">Maintains review session state, conversation history &amp; artifact index across all calls</div><span class="cb">Azure Cosmos DB</span></div>
+            <div class="comp vt"><div class="c-ico">📊</div><div class="cn">Telemetry &amp; Tracing</div><div class="ct">Distributed tracing · token usage · latency · error rates · immutable audit log</div><span class="cb">Azure Monitor / OTEL</span></div>
+            <div class="comp vv"><div class="c-ico">🔔</div><div class="cn">Notification Dispatcher</div><div class="ct">HITL gates, clarification requests, action reminders via Teams, email, ServiceNow</div><span class="cb">Azure Comm. Services</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>Form Data + Docs</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Dispatch to Agents</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Retrieved Context</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Agent Results</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Scores + ADRs</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L4: INTAKE -->
+  <div class="layer">
+    <div class="ltab">Intake</div>
+    <div class="band btc">
+      <div class="bh"><div class="bh-ico" style="background:var(--cyan-lt)">📥</div><div class="bt" style="color:var(--cyan)">Intake &amp; Document Processing Agent</div><div class="bs">GATE ★ 1 — SA PROVIDES ALL INPUTS</div></div>
+      <div class="brow">
+        <div class="comp vc"><div class="c-ico">📝</div><div class="cn">Dynamic Intake Form</div><div class="ct">Solution context · problem statement · stakeholders · growth plans · business NFRs</div><span class="cb">React / ServiceNow</span></div>
+        <div class="comp vc"><div class="c-ico">📁</div><div class="cn">Artifact Upload Handler</div><div class="ct">Accepts PPTX, PDF, Visio, PNG, DOCX, CSV · validates type, size &amp; completeness rules</div><span class="cb">Azure Blob Storage</span></div>
+        <div class="comp vc"><div class="c-ico">👁️</div><div class="cn">Multi-Modal Parser</div><div class="ct">Extracts text + structure from diagrams, SBOM, integration catalogue using vision LLM</div><span class="cb">GPT-4o Vision</span></div>
+        <div class="comp vc"><div class="c-ico">✂️</div><div class="cn">Chunking &amp; Metadata Extractor</div><div class="ct">Layout-aware chunking · table extraction · entity tagging · classification labelling</div><span class="cb">Azure Doc Intelligence</span></div>
+        <div class="comp vc"><div class="c-ico">✅</div><div class="cn">Completeness Validator</div><div class="ct">Checks all mandatory sections · generates clarification requests back to SA if gaps found</div><span class="cb">Rules Engine</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>Structured Chunks</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Embed &amp; Index</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Query Knowledge Base</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Retrieve Standards</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L5: KNOWLEDGE BASE + LLM -->
+  <div class="layer">
+    <div class="ltab">Knowledge</div>
+    <div class="spl" style="flex:1">
+      <div class="band btt sw">
+        <div class="bh"><div class="bh-ico" style="background:var(--teal-lt)">📚</div><div class="bt" style="color:var(--teal)">Knowledge Base &amp; RAG Agent</div><div class="bs">HYBRID RETRIEVAL · VERSIONED</div></div>
+        <div class="brow" style="margin-bottom:9px">
+          <div class="comp vt"><div class="c-ico">🔎</div><div class="cn">Hybrid Search Engine</div><div class="ct">Dense (embedding) + sparse (BM25) · metadata filtering by domain, version, effective date</div><span class="cb">Azure AI Search</span></div>
+          <div class="comp vt"><div class="c-ico">🧮</div><div class="cn">Embedding Pipeline</div><div class="ct">text-embedding-3-large · 6 domain-scoped vector indices: App, Integration, Data, Security, Infra, DevSecOps</div><span class="cb">OpenAI Embeddings</span></div>
+          <div class="comp vt"><div class="c-ico">🔗</div><div class="cn">Confluence / SharePoint Connector</div><div class="ct">Pulls latest principles, standards, policies · version-aware: always fetches current approved version</div><span class="cb">Confluence REST API</span></div>
+        </div>
+        <div class="brow">
+          <div class="comp vt" style="text-align:center;padding:9px 7px"><div class="c-ico" style="margin:0 auto 5px">📐</div><div class="cn">Architecture Principles</div><div class="ct">Business, App, Data, Infra, Integration, Security</div></div>
+          <div class="comp vt" style="text-align:center;padding:9px 7px"><div class="c-ico" style="margin:0 auto 5px">🔷</div><div class="cn">Approved Patterns</div><div class="ct">API, Event, Microservices, HA/DR, Cloud, IaC, DevSecOps</div></div>
+          <div class="comp vt" style="text-align:center;padding:9px 7px"><div class="c-ico" style="margin:0 auto 5px">📜</div><div class="cn">Standards &amp; Policies</div><div class="ct">Security, data classification, regulatory, tech standards</div></div>
+          <div class="comp vt" style="text-align:center;padding:9px 7px"><div class="c-ico" style="margin:0 auto 5px">📂</div><div class="cn">ADR Repository</div><div class="ct">Past ARB decisions, waivers, approved deviations</div></div>
+          <div class="comp vt" style="text-align:center;padding:9px 7px"><div class="c-ico" style="margin:0 auto 5px">🗄️</div><div class="cn">Interface &amp; Data Catalogs</div><div class="ct">CMDB, Data Dictionary, Integration Catalogue, Eliza</div></div>
+        </div>
+      </div>
+      <div class="band btc sn">
+        <div class="bh"><div class="bh-ico" style="background:var(--cyan-lt)">🧠</div><div class="bt" style="color:var(--cyan)">LLM Engine</div><div class="bs">AZURE OPENAI</div></div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <div class="comp vc"><div class="c-ico">🧠</div><div class="cn">GPT-4o / Claude 3.5 Sonnet</div><div class="ct">Multi-modal · structured JSON output · 128k context · in-tenant deployment</div><span class="cb">Azure OpenAI</span></div>
+          <div class="comp vc"><div class="c-ico">⚙️</div><div class="cn">Prompt Engineering Layer</div><div class="ct">System prompts per domain · few-shot ADR examples · chain-of-thought compliance · guardrails</div><span class="cb">LangChain / LangGraph</span></div>
+          <div class="comp vr"><div class="c-ico">🛡️</div><div class="cn">Content Safety &amp; Guardrails</div><div class="ct">Hallucination detection · source citation enforcement · no unbounded outputs</div><span class="cb">Azure Content Safety</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>Retrieved Standards</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Domain Context</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>LLM Completions</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Validation Results</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>RAG Scores + Gaps</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L6: DOMAIN AGENTS -->
+  <div class="layer">
+    <div class="ltab">Validation</div>
+    <div class="spl" style="flex:1">
+      <div class="band bta sw">
+        <div class="bh"><div class="bh-ico" style="background:var(--amber-lt)">⚡</div><div class="bt" style="color:var(--amber)">Domain Validation Sub-Agents — Run in Parallel</div><div class="bs">6 SPECIALIST AGENTS</div></div>
+        <div class="agrid">
+          <div class="acard" style="border-top:3px solid var(--blue)"><div class="ai" style="background:var(--blue-lt)">🖥️</div><div class="an">App Architecture Agent</div><div class="as">Tech choices vs standards · SBOM · resilience patterns · versioning · doc currency</div></div>
+          <div class="acard" style="border-top:3px solid var(--cyan)"><div class="ai" style="background:var(--cyan-lt)">🔗</div><div class="an">Integration Agent</div><div class="as">Catalogue completeness · API design · event schemas · idempotency · throttling</div></div>
+          <div class="acard" style="border-top:3px solid var(--teal)"><div class="ai" style="background:var(--teal-lt)">🗃️</div><div class="an">Data Architecture Agent</div><div class="as">Classification · data lifecycle · model docs · EoS/EoL tracking</div></div>
+          <div class="acard" style="border-top:3px solid var(--red)"><div class="ai" style="background:var(--red-lt)">🔐</div><div class="an">Security Agent</div><div class="as">AuthN/AuthZ · RBAC/IAM · PKI · VAPT evidence · legal compliance</div></div>
+          <div class="acard" style="border-top:3px solid var(--violet)"><div class="ai" style="background:var(--violet-lt)">☁️</div><div class="an">Infra / Platform Agent</div><div class="as">Environments · platform upgrades · IaC · capacity · EoS/EoL</div></div>
+          <div class="acard" style="border-top:3px solid var(--green)"><div class="ai" style="background:var(--green-lt)">⚙️</div><div class="an">DevSecOps Agent</div><div class="as">CI/CD gates · SAST/DAST · SW quality · code reviews · deployment strategy</div></div>
+        </div>
+      </div>
+      <div class="band bta sn">
+        <div class="bh"><div class="bh-ico" style="background:var(--amber-lt)">📏</div><div class="bt" style="color:var(--amber)">NFR Assessment Agent</div><div class="bs">RAG 1–5 SCORING</div></div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div class="comp va"><div class="c-ico">⚡</div><div class="cn">Scalability &amp; Performance</div><div class="ct">TPS, response time, YoY growth, batch/peak load vs SLO baselines</div></div>
+          <div class="comp va"><div class="c-ico">🔄</div><div class="cn">HA, Resilience &amp; DR</div><div class="ct">Four/Five-9s targets · DR/RPO/RTO · SPOF analysis · failover</div></div>
+          <div class="comp vr"><div class="c-ico">🔒</div><div class="cn">Security NFRs</div><div class="ct">Auth standards · encryption · VAPT · regulatory — must be Green</div></div>
+          <div class="comp va"><div class="c-ico">🏗️</div><div class="cn">Engineering Quality</div><div class="ct">Static analysis · test coverage · defect tracking · automation maturity</div></div>
+          <div class="comp vg" style="background:var(--green-lt);border-color:rgba(22,101,52,.15)"><div class="c-ico">🎯</div><div class="cn">RAG / 1–5 Scorer</div><div class="ct">Score per category with evidence citations · generates gap list and conditions</div><span class="cb">🟢 Green &nbsp;🟡 Amber &nbsp;🔴 Red</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>Validation Reports</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>RAG Scores</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Gap Lists</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Draft ADRs</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L7: DECISION + ADR -->
+  <div class="layer">
+    <div class="ltab">Decision</div>
+    <div class="band btg">
+      <div class="bh"><div class="bh-ico" style="background:var(--green-lt)">⚖️</div><div class="bt" style="color:var(--green)">Decision &amp; ADR Generation Agent</div><div class="bs">STRUCTURED JSON · DECISION TAXONOMY</div></div>
+      <div class="spl">
+        <div style="flex:2.4;display:flex;gap:9px">
+          <div class="comp vg"><div class="c-ico">⚖️</div><div class="cn">Decision Synthesiser</div><div class="ct">Aggregates all domain + NFR scores · applies decision taxonomy · resolves conflicts by domain priority (Security &gt; DR &gt; others)</div><span class="cb">GPT-4o Structured Output</span></div>
+          <div class="comp vg"><div class="c-ico">📄</div><div class="cn">ADR Generator</div><div class="ct">One ADR per decision: context, options, decision, rationale, consequences, owner, target date, status</div><span class="cb">Structured JSON Schema</span></div>
+          <div class="comp vg"><div class="c-ico">📋</div><div class="cn">Action Register Builder</div><div class="ct">Extracts Amber-condition actions · assigns owner + target date · links to ADR · generates check-back reminders</div><span class="cb">LangChain Tool Call</span></div>
+          <div class="comp vg"><div class="c-ico">📑</div><div class="cn">Report Assembler</div><div class="ct">12-section pre-ARB dossier · DOCX/PDF + JSON payload · embeds citations, scores, ADRs, action register</div><span class="cb">python-docx / WeasyPrint</span></div>
+        </div>
+        <div style="flex:1">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--ink3);margin-bottom:7px;letter-spacing:0.1em;font-weight:600">DECISION TAXONOMY</div>
+          <div class="dgrid">
+            <div class="dbox dap"><span class="di">✅</span><div class="dn">APPROVE</div><div class="ds">Meets all standards &amp; NFRs; minor actions tracked</div></div>
+            <div class="dbox dco"><span class="di">⚠️</span><div class="dn">APPROVE w/ ACTIONS</div><div class="ds">Conditions &amp; timelines; post-ARB validations required</div></div>
+            <div class="dbox dde"><span class="di">⏸️</span><div class="dn">DEFER</div><div class="ds">Gaps identified; return with updates by target date</div></div>
+            <div class="dbox dre"><span class="di">❌</span><div class="dn">REJECT</div><div class="ds">Misaligned, unsafe or unviable; rework required</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>Draft Dossier</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>ADR Package</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Action Register</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>To EA Review</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L8: HITL -->
+  <div class="layer">
+    <div class="ltab">HITL</div>
+    <div class="hitl">
+      <div class="hitl-lbl">⭐ HUMAN-IN-THE-LOOP GATE — EA REVIEW &amp; APPROVAL</div>
+      <div class="brow" style="margin-top:6px">
+        <div class="comp va"><div class="c-ico">🏛️</div><div class="cn">EA Review Portal</div><div class="ct">Full pre-ARB dossier delivered to EA. Side-by-side view: agent recommendation vs knowledge base source. One-click accept, override with rationale, or send-back.</div><span class="cb">React Dashboard</span></div>
+        <div class="comp va"><div class="c-ico">✏️</div><div class="cn">Override &amp; Annotation Engine</div><div class="ct">EA overrides any agent decision with documented rationale · annotations persisted to audit log · overrides fed back to KB improvement loop</div><span class="cb">Immutable Audit Log</span></div>
+        <div class="comp va"><div class="c-ico">🔁</div><div class="cn">Rework Loop</div><div class="ct">EA sends back → SA notified with specific gaps → SA re-submits → agent re-runs targeted validation only (not full pipeline)</div><span class="cb">Incremental Re-run</span></div>
+        <div class="comp vg"><div class="c-ico">✅</div><div class="cn">EA Approval Gate</div><div class="ct">EA approval finalises pre-ARB report · triggers: publish dossier, schedule ARB, CMDB write-back, notify panel members</div><span class="cb">⭐ GATE 2 COMPLETE</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flows">
+    <div class="fi"><span>Approved Dossier</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>ADRs + JSON Payload</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>Action Register</span><div class="fsh"></div><div class="far"></div></div>
+    <div class="fi"><span>ARB Agenda Generated</span><div class="fsh"></div><div class="far"></div></div>
+  </div>
+
+  <!-- L9: OUTPUTS -->
+  <div class="layer">
+    <div class="ltab">Outputs</div>
+    <div class="band btg">
+      <div class="bh"><div class="bh-ico" style="background:var(--green-lt)">📤</div><div class="bt" style="color:var(--green)">Outputs, Persistence &amp; Write-backs</div><div class="bs">PUBLISHED &amp; PERSISTED</div></div>
+      <div class="ogrid">
+        <div class="comp vg"><div class="c-ico">📘</div><div class="cn">Pre-ARB Dossier</div><div class="ct">12-section DOCX/PDF: scores, ADRs, action register, cross-platform impact · Published to ARB portal + Confluence</div><span class="cb">python-docx / PDF</span></div>
+        <div class="comp vt"><div class="c-ico">🗂️</div><div class="cn">ADR Write-back</div><div class="ct">JSON ADRs → Confluence ADR space &amp; CMDB · Interface/data catalogs updated · version history maintained</div><span class="cb">Confluence API / CMDB</span></div>
+        <div class="comp vv"><div class="c-ico">📅</div><div class="cn">ARB Meeting Scheduler</div><div class="ct">Auto-generates 90–120 min time-boxed agenda · books calendar · sends invites by role · links dossier</div><span class="cb">MS Graph Calendar API</span></div>
+        <div class="comp vb"><div class="c-ico">📈</div><div class="cn">Analytics Dashboard</div><div class="ct">ARB cycle time · review quality · EA override rate · ADR closure rate · leadership view</div><span class="cb">Power BI / Azure Monitor</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- L10: FEEDBACK -->
+  <div class="layer">
+    <div class="ltab">Feedback</div>
+    <div class="band btv">
+      <div class="bh"><div class="bh-ico" style="background:var(--violet-lt)">🔄</div><div class="bt" style="color:var(--violet)">Feedback Loop &amp; Continuous Improvement</div><div class="bs">SELF-IMPROVING PIPELINE</div></div>
+      <div class="brow">
+        <div class="comp vv"><div class="c-ico">🔄</div><div class="cn">EA Override Feedback</div><div class="ct">Override rationale fed back as fine-tuning signal · updates prompt examples · improves domain agent accuracy over time</div></div>
+        <div class="comp vv"><div class="c-ico">📖</div><div class="cn">KB Refresh Pipeline</div><div class="ct">Post-ARB lessons learned → Confluence → re-indexed into vector store · updates propagated within 24h</div></div>
+        <div class="comp vv"><div class="c-ico">🧪</div><div class="cn">Eval &amp; Regression Suite</div><div class="ct">Golden set of past ARB reviews used to regression-test agent accuracy after KB or prompt updates · nightly run</div></div>
+        <div class="comp vv"><div class="c-ico">📉</div><div class="cn">Drift Detection</div><div class="ct">Monitors agent score distributions for drift · alerts EA team if override rate spikes above threshold</div></div>
+        <div class="comp vs"><div class="c-ico">⚖️</div><div class="cn">Responsible AI Controls</div><div class="ct">Eliza Workbench pathway · bias checks · explainability: every score has evidence citations and reasoning chain</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- METRICS -->
+  <div class="metrics">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--ink3);letter-spacing:0.15em;font-weight:600;display:flex;align-items:center;margin-right:4px">SLA TARGETS</div>
+    <div class="mp"><div class="md" style="background:var(--cyan)"></div>Intake completion: ≤ 2 days (SA)</div>
+    <div class="mp"><div class="md" style="background:var(--amber)"></div>Agent processing: ≤ 4 hours (automated)</div>
+    <div class="mp"><div class="md" style="background:var(--green)"></div>EA review: ≤ 1 business day</div>
+    <div class="mp"><div class="md" style="background:var(--blue)"></div>Total pre-ARB cycle: ≤ 4 days</div>
+    <div class="mp"><div class="md" style="background:var(--red)"></div>Security / DR: Green required for approval</div>
+    <div class="mp"><div class="md" style="background:var(--violet)"></div>All data in-tenant · No external exfiltration</div>
+  </div>
+
+</div>
+</body>
+</html>
