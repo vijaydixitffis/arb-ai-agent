@@ -2,7 +2,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../ui/Button'
 import { ChevronLeft, Save } from 'lucide-react'
-import { STEPS } from '../../constants/arbSubmission'
+import { useMetadataStore } from '../../stores/metadataStore'
 
 interface ARBHeaderProps {
   currentStep: number
@@ -13,6 +13,7 @@ interface ARBHeaderProps {
 
 export default function ARBHeader({ currentStep, setCurrentStep, progress, onSaveDraft }: ARBHeaderProps) {
   const navigate = useNavigate()
+  const { steps } = useMetadataStore()
 
   return (
     <header className="bg-white border-b">
@@ -37,15 +38,15 @@ export default function ARBHeader({ currentStep, setCurrentStep, progress, onSav
       {/* Stepper */}
       <div className="max-w-7xl mx-auto px-4 py-4">
         <div className="flex gap-2">
-          {STEPS.map((step) => (
+          {steps.map((step) => (
             <button
               key={step.id}
-              onClick={() => setCurrentStep(step.id)}
+              onClick={() => setCurrentStep(step.step_order)}
               title={step.description}
               className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all whitespace-nowrap ${
-                step.id === currentStep
+                step.step_order === currentStep
                   ? 'bg-primary text-primary-foreground shadow-md'
-                  : step.id < currentStep
+                  : step.step_order < currentStep
                   ? 'bg-primary/20 text-primary border border-primary/30'
                   : 'bg-white text-gray-600 border border-gray-300 hover:border-primary/50'
               }`}

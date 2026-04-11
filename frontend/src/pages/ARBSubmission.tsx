@@ -1,20 +1,22 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { useMetadataStore } from '../stores/metadataStore'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import { api } from '../services/api'
-import { STEPS, ARTEFACT_TYPES, ARTEFACTS_BY_DOMAIN, CHECKLIST_ITEMS } from '../constants/arbSubmission'
 import ARBHeader from '../components/ARB/ARBHeader'
 
 export default function ARBSubmission() {
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((state) => state.user)
+  const { steps, loadDomainMetadata, checklistSubsectionsByDomain, loadMetadata, artefactTypes, artefactTemplatesByDomain, stepToDomainMapping } = useMetadataStore()
   const [currentStep, setCurrentStep] = useState(1)
+  const [isLoading, setIsLoading] = useState(true)
   const [submissionId, setSubmissionId] = useState<string | null>(null)
   const [selectedSubsection, setSelectedSubsection] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -22,11 +24,29 @@ export default function ARBSubmission() {
   const [architectureDisposition, setArchitectureDisposition] = useState<string>('')
 
   useEffect(() => {
+    const loadInitialData = async () => {
+      await loadMetadata()
+      setIsLoading(false)
+    }
+    loadInitialData()
+  }, [])
+
+  useEffect(() => {
     if (location.state) {
       setPtxGate(location.state.ptxGate || '')
       setArchitectureDisposition(location.state.architectureDisposition || '')
     }
   }, [location.state])
+
+  useEffect(() => {
+    // Load domain-specific metadata when entering a domain step
+    if (currentStep >= 2 && currentStep <= 9) {
+      const domainSlug = stepToDomainMapping[currentStep]
+      if (domainSlug && !checklistSubsectionsByDomain[domainSlug]) {
+        loadDomainMetadata(domainSlug)
+      }
+    }
+  }, [currentStep, checklistSubsectionsByDomain, loadDomainMetadata, stepToDomainMapping])
   const [artefacts, setArtefacts] = useState<Record<string, Array<{ name: string; type: string; fileName: string; file: File | null }>>>({
     general: [],
     business: [],
@@ -71,7 +91,7 @@ export default function ARBSubmission() {
   })
 
   const handleNext = () => {
-    if (currentStep < STEPS.length) {
+    if (currentStep < steps.length) {
       setCurrentStep(currentStep + 1)
     }
   }
@@ -129,24 +149,11 @@ export default function ARBSubmission() {
     }
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || !submissionId) return
-
-    try {
-      const file = e.target.files[0]
-      await api.uploadArtefact(submissionId, file)
-      alert('File uploaded successfully')
-    } catch (error) {
-      console.error('Error uploading file:', error)
-      alert('Failed to upload file')
-    }
-  }
-
   const calculateProgress = () => {
     const completedSteps = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(
       (step) => step <= currentStep
     ).length
-    return Math.round((completedSteps / STEPS.length) * 100)
+    return Math.round((completedSteps / steps.length) * 100)
   }
 
   const getArtefactIcon = (type: string) => {
@@ -247,16 +254,8 @@ export default function ARBSubmission() {
       case 6:
       case 7:
       case 8:
-        const domainMap: Record<number, { subsections: Record<string, typeof CHECKLIST_ITEMS.general['End User Voices']>; prefix: string }> = {
-          2: { subsections: CHECKLIST_ITEMS.general, prefix: 'general' },
-          3: { subsections: CHECKLIST_ITEMS.business, prefix: 'business' },
-          4: { subsections: CHECKLIST_ITEMS.application, prefix: 'application' },
-          5: { subsections: CHECKLIST_ITEMS.integration, prefix: 'integration' },
-          6: { subsections: CHECKLIST_ITEMS.data, prefix: 'data' },
-          7: { subsections: CHECKLIST_ITEMS.infrastructure, prefix: 'infrastructure' },
-          8: { subsections: CHECKLIST_ITEMS.devsecops, prefix: 'devsecops' },
-        }
-        const domain = domainMap[currentStep]
+        const domainSlug = stepToDomainMapping[currentStep]
+        const subsections = checklistSubsectionsByDomain[domainSlug] || []
         return (
           <div className="space-y-6">
             {/* Artefact Upload Section */}
@@ -270,19 +269,19 @@ export default function ARBSubmission() {
                       className="w-full px-3 py-2 border rounded-md text-sm"
                       value={newArtefact.name}
                       onChange={(e) => {
-                        const selectedArtefact = ARTEFACTS_BY_DOMAIN[domain.prefix as keyof typeof ARTEFACTS_BY_DOMAIN]?.find(
+                        const selectedArtefact = artefactTemplatesByDomain[domainSlug]?.find(
                           (a: any) => a.name === e.target.value
                         )
                         setNewArtefact({
                           ...newArtefact,
                           name: e.target.value,
-                          type: selectedArtefact?.type || '',
-                          domain: domain.prefix,
+                          type: selectedArtefact?.artefact_type?.value || '',
+                          domain: domainSlug,
                         })
                       }}
                     >
                       <option value="">Select artefact</option>
-                      {ARTEFACTS_BY_DOMAIN[domain.prefix as keyof typeof ARTEFACTS_BY_DOMAIN]?.map((artefact: any) => (
+                      {artefactTemplatesByDomain[domainSlug]?.map((artefact: any) => (
                         <option key={artefact.name} value={artefact.name}>
                           {artefact.name}
                         </option>
@@ -297,7 +296,7 @@ export default function ARBSubmission() {
                       onChange={(e) => setNewArtefact({ ...newArtefact, type: e.target.value })}
                     >
                       <option value="">Select type</option>
-                      {ARTEFACT_TYPES.map((type) => (
+                      {artefactTypes.map((type: any) => (
                         <option key={type.value} value={type.value}>
                           {type.label}
                         </option>
@@ -330,7 +329,7 @@ export default function ARBSubmission() {
                     if (newArtefact.name && newArtefact.type && newArtefact.fileName) {
                       setArtefacts({
                         ...artefacts,
-                        [domain.prefix]: [...artefacts[domain.prefix], newArtefact],
+                        [domainSlug]: [...artefacts[domainSlug], newArtefact],
                       })
                       setNewArtefact({ domain: '', name: '', type: '', fileName: '', file: null })
                     }
@@ -343,10 +342,10 @@ export default function ARBSubmission() {
               </div>
 
               {/* Uploaded Artefacts List */}
-              {artefacts[domain.prefix]?.length > 0 && (
+              {artefacts[domainSlug]?.length > 0 && (
                 <div className="space-y-2">
                   <label className="block text-xs font-medium">Uploaded Artefacts</label>
-                  {artefacts[domain.prefix].map((artefact, index) => (
+                  {artefacts[domainSlug].map((artefact, index) => (
                     <div key={index} className="flex items-center justify-between bg-white border rounded-md p-3">
                       <div className="flex items-center gap-3">
                         <span className="text-lg">{getArtefactIcon(artefact.type)}</span>
@@ -365,7 +364,7 @@ export default function ARBSubmission() {
             <div className="mt-8 border-t pt-6">
               <label className="block text-sm font-medium mb-4">Compliance Checklist</label>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {Object.entries(domain.subsections).map(([subsectionName, questions], index) => {
+                {subsections.map((subsection: any, index: number) => {
                   const colors = [
                     'from-blue-50 to-blue-100 border-blue-200 hover:border-blue-400',
                     'from-purple-50 to-purple-100 border-purple-200 hover:border-purple-400',
@@ -378,17 +377,17 @@ export default function ARBSubmission() {
 
                   return (
                     <div
-                      key={subsectionName}
+                      key={subsection.id}
                       onClick={() => {
-                        setSelectedSubsection(subsectionName)
+                        setSelectedSubsection(subsection.name)
                         setIsDialogOpen(true)
                       }}
                       className={`bg-gradient-to-br ${colorClass} border rounded-xl p-5 cursor-pointer hover:shadow-lg hover:scale-105 transition-all duration-200`}
                     >
                       <div className="flex items-start justify-between mb-3">
-                        <h4 className="font-semibold text-gray-800">{subsectionName}</h4>
+                        <h4 className="font-semibold text-gray-800">{subsection.name}</h4>
                         <div className="w-8 h-8 rounded-full bg-white/50 flex items-center justify-center">
-                          <span className="text-sm font-bold text-gray-600">{questions.length}</span>
+                          <span className="text-sm font-bold text-gray-600">{subsection.questions?.length || 0}</span>
                         </div>
                       </div>
                       <p className="text-xs text-gray-600">questions</p>
@@ -417,14 +416,14 @@ export default function ARBSubmission() {
                     </button>
                   </div>
                   <div className="space-y-6">
-                    {domain.subsections[selectedSubsection].map((question) => {
+                    {subsections.find((s: any) => s.name === selectedSubsection)?.questions?.map((question: any) => {
                       const options = ['compliant', 'non_compliant', 'partial', 'na']
                       const optionLabels = ['Yes', 'No', 'Partial', 'NA']
-                      const currentIndex = options.indexOf(formData[`${domain.prefix}_checklist` as keyof typeof formData]?.[question.id] as string) || 0
+                      const currentIndex = options.indexOf((formData as any)[`${domainSlug}_checklist`]?.[question.question_code] as string) || 0
 
                       return (
                         <div key={question.id} className="border rounded-lg p-4">
-                          <p className="font-medium mb-4">{question.question}</p>
+                          <p className="font-medium mb-4">{question.question_text}</p>
                           <div className="mb-4">
                             <div className="relative">
                               <input
@@ -436,9 +435,9 @@ export default function ARBSubmission() {
                                 onChange={(e) => {
                                   setFormData({
                                     ...formData,
-                                    [`${domain.prefix}_checklist`]: {
-                                      ...formData[`${domain.prefix}_checklist` as keyof typeof formData],
-                                      [question.id]: options[parseInt(e.target.value)],
+                                    [`${domainSlug}_checklist`]: {
+                                      ...(formData as any)[`${domainSlug}_checklist`],
+                                      [question.question_code]: options[parseInt(e.target.value)],
                                     },
                                   })
                                 }}
@@ -455,13 +454,13 @@ export default function ARBSubmission() {
                           </div>
                           <Input
                             placeholder="Evidence notes"
-                            value={formData[`${domain.prefix}_evidence` as keyof typeof formData]?.[question.id] || ''}
+                            value={(formData as any)[`${domainSlug}_evidence`]?.[question.question_code] || ''}
                             onChange={(e) => {
                               setFormData({
                                 ...formData,
-                                [`${domain.prefix}_evidence`]: {
-                                  ...formData[`${domain.prefix}_evidence` as keyof typeof formData],
-                                  [question.id]: e.target.value,
+                                [`${domainSlug}_evidence`]: {
+                                  ...(formData as any)[`${domainSlug}_evidence`],
+                                  [question.question_code]: e.target.value,
                                 },
                               })
                             }}
@@ -477,7 +476,7 @@ export default function ARBSubmission() {
           </div>
         )
       case 9:
-        const nfrDomain = { subsections: CHECKLIST_ITEMS.nfr, prefix: 'nfr' }
+        const nfrSubsections = checklistSubsectionsByDomain['nfr'] || []
         return (
           <div className="space-y-6">
             {/* Artefact Upload Section */}
@@ -491,19 +490,19 @@ export default function ARBSubmission() {
                       className="w-full px-3 py-2 border rounded-md text-sm"
                       value={newArtefact.name}
                       onChange={(e) => {
-                        const selectedArtefact = ARTEFACTS_BY_DOMAIN['nfr']?.find(
+                        const selectedArtefact = artefactTemplatesByDomain['nfr']?.find(
                           (a: any) => a.name === e.target.value
                         )
                         setNewArtefact({
                           ...newArtefact,
                           name: e.target.value,
-                          type: selectedArtefact?.type || '',
+                          type: selectedArtefact?.artefact_type?.value || '',
                           domain: 'nfr',
                         })
                       }}
                     >
                       <option value="">Select artefact</option>
-                      {ARTEFACTS_BY_DOMAIN['nfr']?.map((artefact: any) => (
+                      {artefactTemplatesByDomain['nfr']?.map((artefact: any) => (
                         <option key={artefact.name} value={artefact.name}>
                           {artefact.name}
                         </option>
@@ -518,7 +517,7 @@ export default function ARBSubmission() {
                       onChange={(e) => setNewArtefact({ ...newArtefact, type: e.target.value })}
                     >
                       <option value="">Select type</option>
-                      {ARTEFACT_TYPES.map((type) => (
+                      {artefactTypes.map((type: any) => (
                         <option key={type.value} value={type.value}>
                           {type.label}
                         </option>
@@ -586,7 +585,7 @@ export default function ARBSubmission() {
             <div className="mt-8 border-t pt-6">
               <label className="block text-sm font-medium mb-4">NFRs (Quality of Service)</label>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {Object.entries(nfrDomain.subsections).map(([subsectionName, questions], index) => {
+                {nfrSubsections.map((subsection: any, index: number) => {
                   const colors = [
                     'from-red-50 to-red-100 border-red-200 hover:border-red-400',
                     'from-yellow-50 to-yellow-100 border-yellow-200 hover:border-yellow-400',
@@ -596,17 +595,17 @@ export default function ARBSubmission() {
 
                   return (
                     <div
-                      key={subsectionName}
+                      key={subsection.id}
                       onClick={() => {
-                        setSelectedSubsection(subsectionName)
+                        setSelectedSubsection(subsection.name)
                         setIsDialogOpen(true)
                       }}
                       className={`bg-gradient-to-br ${colorClass} border rounded-xl p-5 cursor-pointer hover:shadow-lg hover:scale-105 transition-all duration-200`}
                     >
                       <div className="flex items-start justify-between mb-3">
-                        <h4 className="font-semibold text-gray-800">{subsectionName}</h4>
+                        <h4 className="font-semibold text-gray-800">{subsection.name}</h4>
                         <div className="w-8 h-8 rounded-full bg-white/50 flex items-center justify-center">
-                          <span className="text-sm font-bold text-gray-600">{questions.length}</span>
+                          <span className="text-sm font-bold text-gray-600">{subsection.questions?.length || 0}</span>
                         </div>
                       </div>
                       <p className="text-xs text-gray-600">questions</p>
@@ -635,14 +634,14 @@ export default function ARBSubmission() {
                     </button>
                   </div>
                   <div className="space-y-6">
-                    {nfrDomain.subsections[selectedSubsection].map((question) => {
+                    {nfrSubsections.find((s: any) => s.name === selectedSubsection)?.questions?.map((question: any) => {
                       const options = ['compliant', 'non_compliant', 'partial', 'na']
                       const optionLabels = ['Yes', 'No', 'Partial', 'NA']
-                      const currentIndex = options.indexOf(formData[`${nfrDomain.prefix}_checklist` as keyof typeof formData]?.[question.id] as string) || 0
+                      const currentIndex = options.indexOf((formData as any)[`nfr_checklist`]?.[question.question_code] as string) || 0
 
                       return (
                         <div key={question.id} className="border rounded-lg p-4">
-                          <p className="font-medium mb-4">{question.question}</p>
+                          <p className="font-medium mb-4">{question.question_text}</p>
                           <div className="mb-4">
                             <div className="relative">
                               <input
@@ -654,9 +653,9 @@ export default function ARBSubmission() {
                                 onChange={(e) => {
                                   setFormData({
                                     ...formData,
-                                    [`${nfrDomain.prefix}_checklist`]: {
-                                      ...formData[`${nfrDomain.prefix}_checklist` as keyof typeof formData],
-                                      [question.id]: options[parseInt(e.target.value)],
+                                    [`nfr_checklist`]: {
+                                      ...(formData as any)[`nfr_checklist`],
+                                      [question.question_code]: options[parseInt(e.target.value)],
                                     },
                                   })
                                 }}
@@ -673,13 +672,13 @@ export default function ARBSubmission() {
                           </div>
                           <Input
                             placeholder="Evidence notes"
-                            value={formData[`${nfrDomain.prefix}_evidence` as keyof typeof formData]?.[question.id] || ''}
+                            value={(formData as any)[`nfr_evidence`]?.[question.question_code] || ''}
                             onChange={(e) => {
                               setFormData({
                                 ...formData,
-                                [`${nfrDomain.prefix}_evidence`]: {
-                                  ...formData[`${nfrDomain.prefix}_evidence` as keyof typeof formData],
-                                  [question.id]: e.target.value,
+                                [`nfr_evidence`]: {
+                                  ...(formData as any)[`nfr_evidence`],
+                                  [question.question_code]: e.target.value,
                                 },
                               })
                             }}
@@ -699,6 +698,10 @@ export default function ARBSubmission() {
     }
   }
 
+  if (isLoading || !steps || steps.length === 0) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <ARBHeader
@@ -712,8 +715,8 @@ export default function ARBSubmission() {
         {/* Step Content */}
         <Card>
           <CardHeader>
-            <CardTitle>{STEPS[currentStep - 1].title}</CardTitle>
-            <p className="text-muted-foreground">{STEPS[currentStep - 1].description}</p>
+            <CardTitle>{steps[currentStep - 1].title}</CardTitle>
+            <p className="text-muted-foreground">{steps[currentStep - 1].description}</p>
           </CardHeader>
           <CardContent>
             {renderStepContent()}
@@ -730,7 +733,7 @@ export default function ARBSubmission() {
             <ChevronLeft className="w-4 h-4 mr-2" />
             Previous
           </Button>
-          {currentStep === STEPS.length ? (
+          {currentStep === steps.length ? (
             <Button onClick={handleSubmit}>
               <Send className="w-4 h-4 mr-2" />
               Submit for Review
