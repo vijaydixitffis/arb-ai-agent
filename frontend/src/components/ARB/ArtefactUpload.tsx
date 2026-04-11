@@ -1,7 +1,7 @@
 import React from 'react'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
-import { ARTEFACT_TYPES, ARTEFACTS_BY_DOMAIN } from '../../constants/arbSubmission'
+import { useMetadataStore } from '../../stores/metadataStore'
 
 interface ArtefactUploadProps {
   domain: string
@@ -11,29 +11,20 @@ interface ArtefactUploadProps {
   uploadedArtefacts: Array<{ name: string; type: string; fileName: string; file: File | null }>
 }
 
-const getArtefactIcon = (type: string) => {
-  const icons: Record<string, string> = {
-    't-doc': '📄',
-    't-diag': '📊',
-    't-xls': '📋',
-    't-deck': '📽️',
-    't-log': '📝',
-  }
-  return icons[type] || '📎'
+const getArtefactIcon = (type: string, artefactTypes: any[]) => {
+  const artefactType = artefactTypes.find((t: any) => t.value === type)
+  return artefactType?.icon || '📎'
 }
 
-const getArtefactTypeLabel = (type: string) => {
-  const labels: Record<string, string> = {
-    't-doc': 'Doc',
-    't-diag': 'Diagram',
-    't-xls': 'Sheet',
-    't-deck': 'Deck',
-    't-log': 'Log',
-  }
-  return labels[type] || type
+const getArtefactTypeLabel = (type: string, artefactTypes: any[]) => {
+  const artefactType = artefactTypes.find((t: any) => t.value === type)
+  return artefactType?.label || type
 }
 
 export default function ArtefactUpload({ domain, newArtefact, setNewArtefact, onAddArtefact, uploadedArtefacts }: ArtefactUploadProps) {
+  const { artefactTypes, artefactTemplatesByDomain } = useMetadataStore()
+  const artefacts = artefactTemplatesByDomain[domain] || []
+
   return (
     <div>
       <label className="block text-sm font-medium mb-4">Artefacts</label>
@@ -45,19 +36,19 @@ export default function ArtefactUpload({ domain, newArtefact, setNewArtefact, on
               className="w-full px-3 py-2 border rounded-md text-sm"
               value={newArtefact.name}
               onChange={(e) => {
-                const selectedArtefact = ARTEFACTS_BY_DOMAIN[domain as keyof typeof ARTEFACTS_BY_DOMAIN]?.find(
+                const selectedArtefact = artefacts.find(
                   (a: any) => a.name === e.target.value
                 )
                 setNewArtefact({
                   ...newArtefact,
                   name: e.target.value,
-                  type: selectedArtefact?.type || '',
+                  type: selectedArtefact?.artefact_type?.value || '',
                   domain,
                 })
               }}
             >
               <option value="">Select artefact</option>
-              {ARTEFACTS_BY_DOMAIN[domain as keyof typeof ARTEFACTS_BY_DOMAIN]?.map((artefact: any) => (
+              {artefacts.map((artefact: any) => (
                 <option key={artefact.name} value={artefact.name}>
                   {artefact.name}
                 </option>
@@ -72,7 +63,7 @@ export default function ArtefactUpload({ domain, newArtefact, setNewArtefact, on
               onChange={(e) => setNewArtefact({ ...newArtefact, type: e.target.value })}
             >
               <option value="">Select type</option>
-              {ARTEFACT_TYPES.map((type) => (
+              {artefactTypes.map((type: any) => (
                 <option key={type.value} value={type.value}>
                   {type.label}
                 </option>
@@ -112,13 +103,13 @@ export default function ArtefactUpload({ domain, newArtefact, setNewArtefact, on
           {uploadedArtefacts.map((artefact, index) => (
             <div key={index} className="flex items-center justify-between bg-white border rounded-md p-3">
               <div className="flex items-center gap-3">
-                <span className="text-lg">{getArtefactIcon(artefact.type)}</span>
+                <span className="text-lg">{getArtefactIcon(artefact.type, artefactTypes)}</span>
                 <div>
                   <p className="text-sm font-medium">{artefact.name}</p>
                   <p className="text-xs text-muted-foreground">{artefact.fileName}</p>
                 </div>
               </div>
-              <span className="text-xs px-2 py-1 rounded-full bg-gray-100">{getArtefactTypeLabel(artefact.type)}</span>
+              <span className="text-xs px-2 py-1 rounded-full bg-gray-100">{getArtefactTypeLabel(artefact.type, artefactTypes)}</span>
             </div>
           ))}
         </div>

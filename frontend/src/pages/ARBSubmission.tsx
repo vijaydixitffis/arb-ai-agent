@@ -14,7 +14,7 @@ export default function ARBSubmission() {
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((state) => state.user)
-  const { steps, loadDomainMetadata, checklistSubsectionsByDomain, loadMetadata, artefactTypes, artefactTemplatesByDomain, stepToDomainMapping } = useMetadataStore()
+  const { steps, loadDomainMetadata, checklistSubsectionsByDomain, loadMetadata, artefactTypes, artefactTemplatesByDomain, stepToDomainMapping, questionOptionsByQuestion } = useMetadataStore()
   const [currentStep, setCurrentStep] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [submissionId, setSubmissionId] = useState<string | null>(null)
@@ -150,32 +150,20 @@ export default function ARBSubmission() {
   }
 
   const calculateProgress = () => {
-    const completedSteps = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(
+    const completedSteps = steps.map((step: any) => step.step_order).filter(
       (step) => step <= currentStep
     ).length
     return Math.round((completedSteps / steps.length) * 100)
   }
 
   const getArtefactIcon = (type: string) => {
-    const icons: Record<string, string> = {
-      't-doc': '📄',
-      't-diag': '🗺️',
-      't-xls': '📊',
-      't-deck': '🗺️',
-      't-log': '📋',
-    }
-    return icons[type] || '📄'
+    const artefactType = artefactTypes.find((t: any) => t.value === type)
+    return artefactType?.icon || '📎'
   }
 
   const getArtefactTypeLabel = (type: string) => {
-    const labels: Record<string, string> = {
-      't-doc': 'Doc',
-      't-diag': 'Diagram',
-      't-xls': 'Sheet',
-      't-deck': 'Deck',
-      't-log': 'Log',
-    }
-    return labels[type] || type
+    const artefactType = artefactTypes.find((t: any) => t.value === type)
+    return artefactType?.label || type
   }
 
   const renderStepContent = () => {
@@ -417,8 +405,8 @@ export default function ARBSubmission() {
                   </div>
                   <div className="space-y-6">
                     {subsections.find((s: any) => s.name === selectedSubsection)?.questions?.map((question: any) => {
-                      const options = ['compliant', 'non_compliant', 'partial', 'na']
-                      const optionLabels = ['Yes', 'No', 'Partial', 'NA']
+                      const options = questionOptionsByQuestion[question.question_code]?.map((o: any) => o.value) || ['compliant', 'non_compliant', 'partial', 'na']
+                      const optionLabels = questionOptionsByQuestion[question.question_code]?.map((o: any) => o.label) || ['Yes', 'No', 'Partial', 'NA']
                       const currentIndex = options.indexOf((formData as any)[`${domainSlug}_checklist`]?.[question.question_code] as string) || 0
 
                       return (
@@ -635,8 +623,8 @@ export default function ARBSubmission() {
                   </div>
                   <div className="space-y-6">
                     {nfrSubsections.find((s: any) => s.name === selectedSubsection)?.questions?.map((question: any) => {
-                      const options = ['compliant', 'non_compliant', 'partial', 'na']
-                      const optionLabels = ['Yes', 'No', 'Partial', 'NA']
+                      const options = questionOptionsByQuestion[question.question_code]?.map((o: any) => o.value) || ['compliant', 'non_compliant', 'partial', 'na']
+                      const optionLabels = questionOptionsByQuestion[question.question_code]?.map((o: any) => o.label) || ['Yes', 'No', 'Partial', 'NA']
                       const currentIndex = options.indexOf((formData as any)[`nfr_checklist`]?.[question.question_code] as string) || 0
 
                       return (
