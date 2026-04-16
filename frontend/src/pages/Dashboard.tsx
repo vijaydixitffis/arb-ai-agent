@@ -4,7 +4,6 @@ import { useAuthStore } from '../stores/authStore'
 import { Button } from '../components/ui/Button'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { FileText, Plus, Eye, CheckCircle, Clock, CheckCircle2, XCircle } from 'lucide-react'
-import { api } from '../services/api'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -22,63 +21,36 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token')
-      if (!token) return
-
       const isSolutionArchitect = user?.role === 'solution_architect'
       const isEnterpriseArchitect = user?.role === 'enterprise_architect' || user?.role === 'arb_admin'
 
       if (isSolutionArchitect) {
-        const subs = await api.getSubmissions()
-        setSubmissions(subs)
+        // Mock submissions data - replace with Supabase queries when ready
+        setSubmissions([
+          {
+            id: 'arb-20240409001',
+            project_name: 'Customer 360 Platform',
+            status: 'submitted',
+            created_date: '2024-04-09',
+            overall_progress: 100,
+          },
+        ])
       }
 
       if (isEnterpriseArchitect) {
-        const revs = await api.getReviews()
-        setReviews(revs)
+        // Mock reviews data - replace with Supabase queries when ready
+        setReviews([
+          {
+            id: 'rev-20240409001',
+            submission_id: 'arb-20240409001',
+            project_name: 'Customer 360 Platform',
+            status: 'pending_review',
+            created_date: '2024-04-09',
+          },
+        ])
       }
     } catch (error) {
       console.error('Error fetching data:', error)
-      // Use mock data on error
-      setSubmissions([
-        {
-          id: 'arb-20240409001',
-          project_name: 'Customer 360 Platform',
-          status: 'submitted',
-          created_date: '2024-04-09',
-          overall_progress: 100,
-        },
-        {
-          id: 'arb-20240409002',
-          project_name: 'E-commerce Microservices',
-          status: 'approved',
-          created_date: '2024-04-08',
-          overall_progress: 100,
-        },
-        {
-          id: 'arb-20240409003',
-          project_name: 'Data Lake Migration',
-          status: 'draft',
-          created_date: '2024-04-10',
-          overall_progress: 45,
-        },
-      ])
-      setReviews([
-        {
-          id: 'review-20240409001',
-          submission_id: 'arb-20240409001',
-          project_name: 'Customer 360 Platform',
-          status: 'pending',
-          agent_recommendation: 'APPROVE_WITH_ACTIONS',
-        },
-        {
-          id: 'review-20240409002',
-          submission_id: 'arb-20240409004',
-          project_name: 'API Gateway Implementation',
-          status: 'pending',
-          agent_recommendation: 'DEFER',
-        },
-      ])
     } finally {
       setLoading(false)
     }

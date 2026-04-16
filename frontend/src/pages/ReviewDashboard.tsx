@@ -4,7 +4,6 @@ import { Button } from '../components/ui/Button'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Textarea } from '../components/ui/Textarea'
 import { ChevronLeft, CheckCircle, XCircle, AlertCircle, Clock } from 'lucide-react'
-import { api } from '../services/api'
 
 export default function ReviewDashboard() {
   const navigate = useNavigate()
@@ -19,11 +18,11 @@ export default function ReviewDashboard() {
 
   const fetchReviewData = async () => {
     try {
-      const review = await api.getReviewBySubmission(submissionId || '')
-      // Update state with review data
+      // Mock data - replace with Supabase queries when ready
+      // const review = await api.getReviewBySubmission(submissionId || '')
+      setLoading(false)
     } catch (error) {
       console.error('Error fetching review data:', error)
-    } finally {
       setLoading(false)
     }
   }
@@ -82,7 +81,8 @@ export default function ReviewDashboard() {
 
   const handleAccept = async () => {
     try {
-      await api.approveReview(submissionId || '')
+      // Mock accept - replace with Supabase query when ready
+      // await api.approveReview(submissionId || '')
       navigate('/dashboard')
     } catch (error) {
       console.error('Error accepting review:', error)
@@ -96,7 +96,8 @@ export default function ReviewDashboard() {
       return
     }
     try {
-      await api.overrideReview(submissionId || '', eaDecision, overrideRationale)
+      // Mock override - replace with Supabase query when ready
+      // await api.overrideReview(submissionId || '', eaDecision, overrideRationale)
       navigate('/dashboard')
     } catch (error) {
       console.error('Error overriding review:', error)

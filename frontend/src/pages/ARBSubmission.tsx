@@ -7,7 +7,6 @@ import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { ChevronLeft, ChevronRight, Send } from 'lucide-react'
-import { api } from '../services/api'
 import ARBHeader from '../components/ARB/ARBHeader'
 
 export default function ARBSubmission() {
@@ -111,10 +110,13 @@ export default function ARBSubmission() {
       }
 
       if (submissionId) {
-        await api.updateSubmission(submissionId, submissionData)
+        // Mock update - replace with Supabase query when ready
+        // await api.updateSubmission(submissionId, submissionData)
       } else {
-        const result = await api.createSubmission(submissionData)
-        setSubmissionId(result.id)
+        // Mock create - replace with Supabase query when ready
+        // const result = await api.createSubmission(submissionData)
+        // setSubmissionId(result.id)
+        setSubmissionId('mock-submission-id')
       }
       alert('Draft saved successfully')
     } catch (error) {
@@ -132,15 +134,18 @@ export default function ARBSubmission() {
       }
 
       if (submissionId) {
-        await api.updateSubmission(submissionId, submissionData)
-        await api.submitSubmission(submissionId)
+        // Mock update - replace with Supabase query when ready
+        // await api.updateSubmission(submissionId, submissionData)
+        // await api.submitSubmission(submissionId)
       } else {
-        const result = await api.createSubmission(submissionData)
-        await api.submitSubmission(result.id)
+        // Mock create - replace with Supabase query when ready
+        // const result = await api.createSubmission(submissionData)
+        // await api.submitSubmission(result.id)
+        setSubmissionId('mock-submission-id')
       }
 
-      // Trigger AI agent review
-      await api.runARBReview({ submission_id: submissionId || '', domain_sections: formData })
+      // Mock AI agent review - replace with Supabase query when ready
+      // await api.runARBReview({ submission_id: submissionId || '', domain_sections: formData })
 
       navigate('/dashboard')
     } catch (error) {
