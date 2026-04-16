@@ -33,7 +33,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode,
 function App() {
   console.log('App component rendering')
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/arb-ai-agent">
       <LocationLogger />
       <Routes>
         <Route path="/login" element={
