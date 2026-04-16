@@ -4,7 +4,6 @@ import { useAuthStore } from '../stores/authStore'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
-import { supabase } from '../services/supabase'
 
 const demoUsers = [
   { email: 'sa@arb.demo', password: 'demo1234', role: 'solution_architect', label: 'Solution Architect' },
@@ -31,29 +30,22 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (error) throw error
-
-      if (data.user) {
-        // Get user role from user metadata or default based on email
-        const role = data.user.user_metadata?.role || 
-          (email.includes('sa') ? 'solution_architect' : 
-           email.includes('ea') ? 'enterprise_architect' : 'arb_admin')
-
+      // Simple hardcoded validation
+      const user = demoUsers.find(u => u.email === email && u.password === password)
+      
+      if (user) {
         setAuth(
           {
-            id: data.user.id,
-            email: data.user.email!,
-            name: data.user.user_metadata?.name || data.user.email!.split('@')[0],
-            role,
+            id: user.email,
+            email: user.email,
+            name: user.label,
+            role: user.role,
           },
-          data.session.access_token
+          'demo-token-' + Date.now()
         )
         navigate('/dashboard')
+      } else {
+        setError('Invalid credentials. Please try again.')
       }
     } catch (err) {
       setError('Invalid credentials. Please try again.')
