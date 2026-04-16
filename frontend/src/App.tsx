@@ -8,19 +8,24 @@ import Layout from './components/layout/Layout'
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
   const { user } = useAuthStore()
+  console.log('ProtectedRoute - user:', user, 'allowedRoles:', allowedRoles)
   
   if (!user) {
+    console.log('ProtectedRoute - redirecting to /login')
     return <Navigate to="/login" replace />
   }
   
   if (allowedRoles && !allowedRoles.includes(user.role)) {
+    console.log('ProtectedRoute - redirecting to /dashboard (role not allowed)')
     return <Navigate to="/dashboard" replace />
   }
   
+  console.log('ProtectedRoute - rendering children')
   return <>{children}</>
 }
 
 function App() {
+  console.log('App component rendering')
   return (
     <BrowserRouter>
       <Routes>
