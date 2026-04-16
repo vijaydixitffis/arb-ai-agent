@@ -1,10 +1,16 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import ARBSubmission from './pages/ARBSubmission'
 import ReviewDashboard from './pages/ReviewDashboard'
 import Layout from './components/layout/Layout'
+
+function LocationLogger() {
+  const location = useLocation()
+  console.log('Current location:', location.pathname)
+  return null
+}
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
   const { user } = useAuthStore()
@@ -28,12 +34,21 @@ function App() {
   console.log('App component rendering')
   return (
     <BrowserRouter>
+      <LocationLogger />
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={
+          <>
+            {console.log('Rendering /login route')}
+            <LoginPage />
+          </>
+        } />
         <Route path="/" element={
-          <ProtectedRoute>
-            <Layout />
-          </ProtectedRoute>
+          <>
+            {console.log('Rendering / route with ProtectedRoute')}
+            <ProtectedRoute>
+              <Layout />
+            </ProtectedRoute>
+          </>
         }>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
