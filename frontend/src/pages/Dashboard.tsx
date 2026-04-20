@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { reviewService } from '../services/reviewService'
 import { Button } from '../components/ui/Button'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { FileText, Plus, Eye, CheckCircle, Clock, CheckCircle2, XCircle } from 'lucide-react'
@@ -19,35 +20,47 @@ export default function Dashboard() {
     fetchData()
   }, [])
 
+  const handleMarkReadyForReview = async (reviewId: string) => {
+    try {
+      if (confirm('Are you sure you want to mark this submission as ready for review? This will trigger the AI review process.')) {
+        await reviewService.markReadyForReview(reviewId)
+        alert('Review process initiated successfully')
+        fetchData() // Refresh the dashboard
+      }
+    } catch (error) {
+      console.error('Error marking as ready for review:', error)
+      alert(`Failed to mark as ready for review: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
   const fetchData = async () => {
     try {
       const isSolutionArchitect = user?.role === 'solution_architect'
       const isEnterpriseArchitect = user?.role === 'enterprise_architect' || user?.role === 'arb_admin'
 
       if (isSolutionArchitect) {
-        // Mock submissions data - replace with Supabase queries when ready
-        setSubmissions([
-          {
-            id: 'arb-20240409001',
-            project_name: 'Customer 360 Platform',
-            status: 'submitted',
-            created_date: '2024-04-09',
-            overall_progress: 100,
-          },
-        ])
+        // Fetch reviews from Supabase for current user
+        const userReviews = await reviewService.getUserReviews()
+        setSubmissions(userReviews.map((review: any) => ({
+          id: review.id,
+          project_name: review.solution_name,
+          status: review.status,
+          created_date: new Date(review.created_at).toISOString().split('T')[0],
+          overall_progress: review.status === 'ea_review' || review.status === 'approved' || review.status === 'rejected' ? 100 : review.status === 'submitted' ? 80 : review.status === 'draft' ? 30 : 50,
+        })))
       }
 
       if (isEnterpriseArchitect) {
-        // Mock reviews data - replace with Supabase queries when ready
-        setReviews([
-          {
-            id: 'rev-20240409001',
-            submission_id: 'arb-20240409001',
-            project_name: 'Customer 360 Platform',
-            status: 'pending_review',
-            created_date: '2024-04-09',
-          },
-        ])
+        // For EA, fetch all reviews
+        const allReviews = await reviewService.getAllReviews()
+        setReviews(allReviews.map((review: any) => ({
+          id: review.id,
+          submission_id: review.id,
+          project_name: review.solution_name,
+          status: review.status,
+          agent_recommendation: review.decision || 'pending',
+          created_date: new Date(review.created_at).toISOString().split('T')[0],
+        })))
       }
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -184,18 +197,45 @@ export default function Dashboard() {
                         <td className="py-3 px-4">
                           <span className={`text-sm px-2 py-1 rounded ${
                             submission.status === 'approved' ? 'bg-green-100 text-green-800' :
-                            submission.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                            submission.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                            submission.status === 'submitted' ? 'bg-yellow-100 text-yellow-800' :
                             submission.status === 'draft' ? 'bg-gray-100 text-gray-800' :
-                            'bg-red-100 text-red-800'
+                            submission.status === 'in_review' ? 'bg-blue-100 text-blue-800' :
+                            submission.status === 'ea_review' ? 'bg-purple-100 text-purple-800' :
+                            'bg-gray-100 text-gray-800'
                           }`}>
-                            {submission.status}
+                            {submission.status.replace('_', ' ')}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-sm text-gray-600">{submission.created_date}</td>
                         <td className="py-3 px-4">
-                          <Button variant="ghost" size="sm">
-                            <Eye className="w-4 h-4" />
-                          </Button>
+                          <div className="flex gap-2">
+                            {submission.status === 'draft' || submission.status === 'submitted' ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => navigate(`/submission/new`, { state: { reviewId: submission.id } })}
+                              >
+                                Edit
+                              </Button>
+                            ) : null}
+                            {submission.status === 'submitted' ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleMarkReadyForReview(submission.id)}
+                              >
+                                Ready for Review
+                              </Button>
+                            ) : null}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => navigate(`/review-status/${submission.id}`)}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}

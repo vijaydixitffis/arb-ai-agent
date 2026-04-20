@@ -5,24 +5,13 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 
-const demoUsers = [
-  { email: 'sa@arb.demo', password: 'demo1234', role: 'solution_architect', label: 'Solution Architect' },
-  { email: 'ea@arb.demo', password: 'demo1234', role: 'enterprise_architect', label: 'Enterprise Architect' },
-  { email: 'admin@arb.demo', password: 'demo1234', role: 'arb_admin', label: 'ARB Admin' },
-]
-
 export default function LoginPage() {
   const navigate = useNavigate()
-  const setAuth = useAuthStore((state) => state.setAuth)
+  const loginWithSupabase = useAuthStore((state) => state.loginWithSupabase)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-
-  const handleDemoLogin = (user: typeof demoUsers[0]) => {
-    setEmail(user.email)
-    setPassword(user.password)
-  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -30,25 +19,10 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      // Simple hardcoded validation
-      const user = demoUsers.find(u => u.email === email && u.password === password)
-      
-      if (user) {
-        setAuth(
-          {
-            id: user.email,
-            email: user.email,
-            name: user.label,
-            role: user.role,
-          },
-          'demo-token-' + Date.now()
-        )
-        navigate('/dashboard')
-      } else {
-        setError('Invalid credentials. Please try again.')
-      }
+      await loginWithSupabase(email, password)
+      navigate('/dashboard')
     } catch (err) {
-      setError('Invalid credentials. Please try again.')
+      setError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -92,23 +66,6 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
-
-          <div className="mt-6">
-            <p className="text-sm text-center text-muted-foreground mb-3">Quick Login (Demo)</p>
-            <div className="space-y-2">
-              {demoUsers.map((user) => (
-                <Button
-                  key={user.email}
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => handleDemoLogin(user)}
-                  disabled={loading}
-                >
-                  {user.label}
-                </Button>
-              ))}
-            </div>
-          </div>
         </CardContent>
       </Card>
     </div>

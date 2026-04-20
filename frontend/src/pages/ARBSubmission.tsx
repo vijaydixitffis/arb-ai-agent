@@ -8,6 +8,7 @@ import { Textarea } from '../components/ui/Textarea'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import ARBHeader from '../components/ARB/ARBHeader'
+import { reviewService } from '../services/reviewService'
 
 export default function ARBSubmission() {
   const navigate = useNavigate()
@@ -25,6 +26,24 @@ export default function ARBSubmission() {
   useEffect(() => {
     const loadInitialData = async () => {
       await loadMetadata()
+      
+      // Check if editing an existing review
+      const state = location.state as { reviewId?: string }
+      if (state?.reviewId) {
+        try {
+          const draftData = await reviewService.loadDraftData(state.reviewId)
+          setSubmissionId(state.reviewId)
+          
+          // Load form data from draft
+          if (draftData.formData) {
+            setFormData(draftData.formData)
+          }
+        } catch (error) {
+          console.error('Error loading draft:', error)
+          alert('Failed to load draft data')
+        }
+      }
+      
       setIsLoading(false)
     }
     loadInitialData()
@@ -103,54 +122,129 @@ export default function ARBSubmission() {
 
   const handleSaveDraft = async () => {
     try {
-      const submissionData = {
-        ...formData,
-        solution_architect_id: user?.id,
-        status: 'draft',
+      const scopeTags = reviewService.extractScopeTags(formData)
+      
+      const draftData = {
+        solution_name: formData.project_name || 'Untitled Review',
+        scope_tags: scopeTags,
+        sa_user_id: user?.id || '',
+        form_data: formData
       }
 
       if (submissionId) {
-        // Mock update - replace with Supabase query when ready
-        // await api.updateSubmission(submissionId, submissionData)
+        await reviewService.updateDraft(submissionId, draftData)
       } else {
-        // Mock create - replace with Supabase query when ready
-        // const result = await api.createSubmission(submissionData)
-        // setSubmissionId(result.id)
-        setSubmissionId('mock-submission-id')
+        const review = await reviewService.createDraft(draftData)
+        setSubmissionId(review.id)
       }
       alert('Draft saved successfully')
     } catch (error) {
       console.error('Error saving draft:', error)
-      alert('Failed to save draft')
+      alert(`Failed to save draft: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
   const handleSubmit = async () => {
     try {
-      const submissionData = {
-        ...formData,
-        solution_architect_id: user?.id,
-        status: 'submitted',
+      // Extract scope tags from form data
+      const scopeTags = reviewService.extractScopeTags(formData)
+
+      // Flatten all artifacts into a single array
+      const allArtifacts = Object.values(artefacts).flat()
+
+      if (allArtifacts.length === 0) {
+        alert('Please upload at least one artifact before submitting')
+        return
       }
 
-      if (submissionId) {
-        // Mock update - replace with Supabase query when ready
-        // await api.updateSubmission(submissionId, submissionData)
-        // await api.submitSubmission(submissionId)
+      // Use the first artifact as the main artifact for review
+      const mainArtifact = allArtifacts[0]
+      if (!mainArtifact.file) {
+        alert('Main artifact file is missing')
+        return
+      }
+
+      let reviewId = submissionId
+
+      // 1. Create or update review record
+      if (reviewId) {
+        // Update existing draft/submitted review
+        await reviewService.updateDraft(reviewId, {
+          solution_name: formData.project_name,
+          scope_tags: scopeTags,
+          sa_user_id: user?.id || '',
+          form_data: formData,
+          status: 'submitted'
+        })
       } else {
-        // Mock create - replace with Supabase query when ready
-        // const result = await api.createSubmission(submissionData)
-        // await api.submitSubmission(result.id)
-        setSubmissionId('mock-submission-id')
+        // Create new review as submitted
+        const review = await reviewService.createDraft({
+          solution_name: formData.project_name,
+          scope_tags: scopeTags,
+          sa_user_id: user?.id || '',
+          form_data: formData
+        })
+        reviewId = review.id
+        setSubmissionId(reviewId)
+        
+        // Update status to submitted
+        if (reviewId) {
+          await reviewService.updateDraft(reviewId, { status: 'submitted' })
+        }
       }
 
-      // Mock AI agent review - replace with Supabase query when ready
-      // await api.runARBReview({ submission_id: submissionId || '', domain_sections: formData })
+      // Guard clause - ensure reviewId is not null
+      if (!reviewId) {
+        alert('Failed to create review record')
+        return
+      }
 
-      navigate('/dashboard')
+      // 2. Upload main artifact to Supabase Storage
+      const artifactInfo = await reviewService.uploadArtifact(reviewId, mainArtifact.file)
+
+      // 3. Update review with artifact path
+      await reviewService.updateReviewArtifactInfo(reviewId, {
+        artifact_path: artifactInfo.fullPath,
+        artifact_filename: artifactInfo.fileName,
+        artifact_file_type: artifactInfo.fileType,
+        artifact_file_size_bytes: artifactInfo.fileSize
+      })
+
+      // 4. Upload additional artifacts if any
+      for (let i = 1; i < allArtifacts.length; i++) {
+        const artifact = allArtifacts[i]
+        if (artifact.file) {
+          await reviewService.uploadArtifact(reviewId, artifact.file)
+        }
+      }
+
+      // 5. Validate completeness
+      const validation = await reviewService.validateCompleteness(reviewId)
+
+      if (!validation.isComplete) {
+        // Show validation errors to user
+        const errorMessage = validation.errors.join('\n')
+        if (confirm(`Submission is incomplete:\n\n${errorMessage}\n\nWould you like to save as submitted and complete later?`)) {
+          // Save as submitted but don't trigger backend
+          alert('Submission saved as submitted. Please complete the missing fields before marking as ready for review.')
+          navigate('/dashboard')
+        }
+        return
+      }
+
+      // 6. If validation passes, ask user if they want to mark as ready for review
+      if (confirm('Submission is complete. Would you like to mark it as ready for review and trigger the AI review process?')) {
+        // Mark as ready for review and trigger backend
+        await reviewService.markReadyForReview(reviewId)
+        navigate(`/review-status/${reviewId}`)
+      } else {
+        // Save as submitted but don't trigger backend
+        alert('Submission saved as submitted. You can mark it as ready for review later from the dashboard.')
+        navigate('/dashboard')
+      }
     } catch (error) {
       console.error('Error submitting:', error)
-      alert('Failed to submit')
+      alert(`Failed to submit: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 

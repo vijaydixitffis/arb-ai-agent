@@ -1,9 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
 import { useAuthStore } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import ARBSubmission from './pages/ARBSubmission'
 import ReviewDashboard from './pages/ReviewDashboard'
+import ReviewStatus from './pages/ReviewStatus'
 import Layout from './components/layout/Layout'
 
 function LocationLogger() {
@@ -12,18 +14,13 @@ function LocationLogger() {
   return null
 }
 
-function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuthStore()
-  console.log('ProtectedRoute - user:', user, 'allowedRoles:', allowedRoles)
+  console.log('ProtectedRoute - user:', user)
   
   if (!user) {
     console.log('ProtectedRoute - redirecting to /login')
     return <Navigate to="/login" replace />
-  }
-  
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    console.log('ProtectedRoute - redirecting to /dashboard (role not allowed)')
-    return <Navigate to="/dashboard" replace />
   }
   
   console.log('ProtectedRoute - rendering children')
@@ -31,6 +28,13 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode,
 }
 
 function App() {
+  const initializeSupabaseSession = useAuthStore((state) => state.initializeSupabaseSession)
+  
+  useEffect(() => {
+    // Initialize Supabase session on app load
+    initializeSupabaseSession()
+  }, [initializeSupabaseSession])
+
   console.log('App component rendering')
   return (
     <BrowserRouter basename="/arb-ai-agent">
@@ -56,15 +60,16 @@ function App() {
           <Route path="reviews" element={<Dashboard />} />
           <Route path="settings" element={<div className="p-8"><h1 className="text-2xl font-bold">Settings</h1><p className="text-gray-600 mt-2">Settings page coming soon</p></div>} />
           <Route path="submission/new" element={
-            <ProtectedRoute allowedRoles={['solution_architect']}>
+            <ProtectedRoute>
               <ARBSubmission />
             </ProtectedRoute>
           } />
           <Route path="review/:submissionId" element={
-            <ProtectedRoute allowedRoles={['enterprise_architect', 'arb_admin']}>
+            <ProtectedRoute>
               <ReviewDashboard />
             </ProtectedRoute>
           } />
+          <Route path="review-status/:reviewId" element={<ReviewStatus />} />
         </Route>
       </Routes>
     </BrowserRouter>

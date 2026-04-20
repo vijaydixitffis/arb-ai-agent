@@ -65,3 +65,6 @@ input-docs/
 
 # Root package-lock.json (use frontend/package-lock.json)
 package-lock.json
+
+# Supabase temp folder
+supabase/.temp/
