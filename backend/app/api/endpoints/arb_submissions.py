@@ -1,28 +1,47 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Header
 from typing import List, Optional
 from app.models.arb_submission import ARBSubmission, DomainSection, ChecklistItem
 from datetime import datetime
+from app.core.security import decode_access_token
 
 router = APIRouter()
 
 # In-memory storage for demo (replace with database in production)
 submissions_db = {}
 
+async def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """Extract user ID from JWT token"""
+    if not authorization:
+        return None
+    if not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ")[1]
+    payload = decode_access_token(token)
+    if not payload:
+        return None
+    return payload.get("sub")
+
 @router.get("/")
-async def get_submissions():
+async def get_submissions(current_user: str = Depends(get_current_user)):
     """Get all ARB submissions"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     return list(submissions_db.values())
 
 @router.get("/{submission_id}")
-async def get_submission(submission_id: str):
+async def get_submission(submission_id: str, current_user: str = Depends(get_current_user)):
     """Get a specific ARB submission"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     if submission_id not in submissions_db:
         raise HTTPException(status_code=404, detail="Submission not found")
     return submissions_db[submission_id]
 
 @router.post("/")
-async def create_submission(submission: ARBSubmission):
+async def create_submission(submission: ARBSubmission, current_user: str = Depends(get_current_user)):
     """Create a new ARB submission"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     submission.id = f"arb-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     submission.created_date = datetime.now()
     submission.overall_progress = calculate_progress(submission)
@@ -30,8 +49,10 @@ async def create_submission(submission: ARBSubmission):
     return submission
 
 @router.put("/{submission_id}")
-async def update_submission(submission_id: str, submission: ARBSubmission):
+async def update_submission(submission_id: str, submission: ARBSubmission, current_user: str = Depends(get_current_user)):
     """Update an existing ARB submission"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     if submission_id not in submissions_db:
         raise HTTPException(status_code=404, detail="Submission not found")
     
@@ -41,8 +62,10 @@ async def update_submission(submission_id: str, submission: ARBSubmission):
     return submission
 
 @router.post("/{submission_id}/submit")
-async def submit_submission(submission_id: str):
+async def submit_submission(submission_id: str, current_user: str = Depends(get_current_user)):
     """Submit ARB submission for review"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     if submission_id not in submissions_db:
         raise HTTPException(status_code=404, detail="Submission not found")
     
@@ -52,8 +75,10 @@ async def submit_submission(submission_id: str):
     return {"message": "Submission submitted successfully", "submission_id": submission_id}
 
 @router.post("/{submission_id}/artefacts")
-async def upload_artefact(submission_id: str, file: UploadFile = File(...)):
+async def upload_artefact(submission_id: str, file: UploadFile = File(...), current_user: str = Depends(get_current_user)):
     """Upload an artefact for a submission"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     if submission_id not in submissions_db:
         raise HTTPException(status_code=404, detail="Submission not found")
     
@@ -71,8 +96,10 @@ async def upload_artefact(submission_id: str, file: UploadFile = File(...)):
     }
 
 @router.post("/{submission_id}/integration-catalogue")
-async def upload_integration_catalogue(submission_id: str, file: UploadFile = File(...)):
+async def upload_integration_catalogue(submission_id: str, file: UploadFile = File(...), current_user: str = Depends(get_current_user)):
     """Upload integration catalogue (Excel/CSV)"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     if submission_id not in submissions_db:
         raise HTTPException(status_code=404, detail="Submission not found")
     

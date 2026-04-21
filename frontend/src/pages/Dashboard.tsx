@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
-import { reviewService } from '../services/reviewService'
+import { reviewService } from '../services/backendConfig'
 import { Button } from '../components/ui/Button'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { FileText, Plus, Eye, CheckCircle, Clock, CheckCircle2, XCircle } from 'lucide-react'
@@ -228,13 +228,15 @@ export default function Dashboard() {
                                 Ready for Review
                               </Button>
                             ) : null}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => navigate(`/review-status/${submission.id}`)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
+                            {submission.status === 'approved' || submission.status === 'rejected' || submission.status === 'deferred' ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => navigate(`/review-status/${submission.id}`)}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>

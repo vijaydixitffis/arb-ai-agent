@@ -68,3 +68,25 @@ package-lock.json
 
 # Supabase temp folder
 supabase/.temp/
+
+# Backup files
+*.bak
+supabase/migrations/*.bak
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+*.cover
+
+# Frontend build
+frontend/dist/
+frontend/build/
+
+# Supabase local
+.supabase/
+supabase/.branches/
+supabase/.functions/

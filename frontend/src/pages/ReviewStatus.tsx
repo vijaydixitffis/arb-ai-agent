@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
-import { reviewService, ReviewStatus as ReviewStatusType } from '../services/reviewService'
+import { reviewService, ReviewStatus as ReviewStatusType } from '../services/backendConfig'
 import { ArrowLeft, CheckCircle, XCircle, Clock, AlertCircle, FileText, Target, AlertTriangle } from 'lucide-react'
 
 export default function ReviewStatus() {
@@ -205,7 +205,7 @@ export default function ReviewStatus() {
             </Card>
 
             {/* Domain Scores */}
-            {reviewStatus.domain_scores.length > 0 && (
+            {reviewStatus.domain_scores && reviewStatus.domain_scores.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle>Domain Scores</CardTitle>
@@ -234,12 +234,12 @@ export default function ReviewStatus() {
             )}
 
             {/* Findings */}
-            {reviewStatus.findings.length > 0 && (
+            {reviewStatus.findings && reviewStatus.findings.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <AlertTriangle className="w-5 h-5 text-orange-500" />
-                    Findings ({reviewStatus.findings.length})
+                    Findings ({reviewStatus.findings?.length || 0})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -271,12 +271,12 @@ export default function ReviewStatus() {
             )}
 
             {/* ADRs */}
-            {reviewStatus.adrs.length > 0 && (
+            {reviewStatus.adrs && reviewStatus.adrs.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <FileText className="w-5 h-5 text-blue-500" />
-                    Architecture Decision Records ({reviewStatus.adrs.length})
+                    Architecture Decision Records ({reviewStatus.adrs?.length || 0})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -312,12 +312,12 @@ export default function ReviewStatus() {
             )}
 
             {/* Actions */}
-            {reviewStatus.actions.length > 0 && (
+            {reviewStatus.actions && reviewStatus.actions.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Target className="w-5 h-5 text-purple-500" />
-                    Action Items ({reviewStatus.actions.length})
+                    Action Items ({reviewStatus.actions?.length || 0})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>

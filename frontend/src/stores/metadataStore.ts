@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { metadataService, Step, Domain, ArtefactType, ArtefactTemplate, ChecklistSubsection, EAPrinciple, FormField, QuestionOption } from '../services/metadataService'
+import { metadataService, Step, Domain, ArtefactType, ArtefactTemplate, ChecklistSubsection, EAPrinciple, FormField, QuestionOption } from '../services/backendConfig'
 
 interface MetadataState {
   steps: Step[]

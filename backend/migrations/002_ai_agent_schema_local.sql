@@ -1,5 +1,27 @@
--- Migration 002: AI Agent Schema
+-- Migration 002: AI Agent Schema (Local PostgreSQL Version)
 -- This migration creates tables for the AI Agent review system
+
+-- ============================================================================
+-- LOCAL USERS TABLE
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  user_password TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'solution_architect' CHECK (role IN ('solution_architect', 'enterprise_architect', 'arb_admin')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed default users
+INSERT INTO users (email, user_password, role) VALUES
+  ('sa_user@mail.com', crypt('password123', gen_salt('bf')), 'solution_architect'),
+  ('ea_user@mail.com', crypt('password123', gen_salt('bf')), 'enterprise_architect'),
+  ('admin@mail.com', crypt('password123', gen_salt('bf')), 'arb_admin')
+ON CONFLICT (email) DO NOTHING;
+
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 -- ============================================================================
 -- MD FILES TABLE (Knowledge Base Metadata)
@@ -55,7 +77,7 @@ CREATE TABLE IF NOT EXISTS reviews (
   
   report_json JSONB,
   
-  CONSTRAINT valid_status CHECK (status IN ('pending', 'in_review', 'ea_review', 'approved', 'rejected', 'deferred')),
+  CONSTRAINT valid_status CHECK (status IN ('draft', 'submitted', 'pending', 'in_review', 'ea_review', 'approved', 'rejected', 'deferred')),
   CONSTRAINT valid_decision CHECK (decision IS NULL OR decision IN ('approve', 'approve_with_conditions', 'defer', 'reject'))
 );
 
@@ -160,157 +182,25 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 
 -- ============================================================================
--- ROW LEVEL SECURITY POLICIES
--- ============================================================================
-
-ALTER TABLE md_files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE domain_scores ENABLE ROW LEVEL SECURITY;
-ALTER TABLE findings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE adrs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE actions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
-
--- md_files policies
-DROP POLICY IF EXISTS "Public read access for md_files" ON md_files;
-CREATE POLICY "Public read access for md_files" ON md_files 
-  FOR SELECT USING (true);
-
--- reviews policies
-DROP POLICY IF EXISTS "SA can create reviews" ON reviews;
-CREATE POLICY "SA can create reviews" ON reviews
-  FOR INSERT WITH CHECK (auth.uid() = sa_user_id);
-
-DROP POLICY IF EXISTS "SA can read own reviews" ON reviews;
-CREATE POLICY "SA can read own reviews" ON reviews
-  FOR SELECT USING (auth.uid() = sa_user_id);
-
-DROP POLICY IF EXISTS "EA and ARB Admin can read all reviews" ON reviews;
-CREATE POLICY "EA and ARB Admin can read all reviews" ON reviews
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.role IN ('enterprise_architect', 'arb_admin')
-    )
-  );
-
-DROP POLICY IF EXISTS "EA and ARB Admin can update review status" ON reviews;
-CREATE POLICY "EA and ARB Admin can update review status" ON reviews
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.role IN ('enterprise_architect', 'arb_admin')
-    )
-  );
-
--- domain_scores policies
-DROP POLICY IF EXISTS "Read domain_scores via review" ON domain_scores;
-CREATE POLICY "Read domain_scores via review" ON domain_scores
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM reviews
-      WHERE reviews.id = domain_scores.review_id
-      AND (reviews.sa_user_id = auth.uid() OR
-           EXISTS (
-             SELECT 1 FROM users
-             WHERE users.id = auth.uid()
-             AND users.role IN ('enterprise_architect', 'arb_admin')
-           ))
-    )
-  );
-
--- findings policies
-DROP POLICY IF EXISTS "Read findings via review" ON findings;
-CREATE POLICY "Read findings via review" ON findings
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM reviews
-      WHERE reviews.id = findings.review_id
-      AND (reviews.sa_user_id = auth.uid() OR
-           EXISTS (
-             SELECT 1 FROM users
-             WHERE users.id = auth.uid()
-             AND users.role IN ('enterprise_architect', 'arb_admin')
-           ))
-    )
-  );
-
--- adrs policies
-DROP POLICY IF EXISTS "Read adrs via review" ON adrs;
-CREATE POLICY "Read adrs via review" ON adrs
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM reviews
-      WHERE reviews.id = adrs.review_id
-      AND (reviews.sa_user_id = auth.uid() OR
-           EXISTS (
-             SELECT 1 FROM users
-             WHERE users.id = auth.uid()
-             AND users.role IN ('enterprise_architect', 'arb_admin')
-           ))
-    )
-  );
-
--- actions policies
-DROP POLICY IF EXISTS "Read actions via review" ON actions;
-CREATE POLICY "Read actions via review" ON actions
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM reviews
-      WHERE reviews.id = actions.review_id
-      AND (reviews.sa_user_id = auth.uid() OR
-           EXISTS (
-             SELECT 1 FROM users
-             WHERE users.id = auth.uid()
-             AND users.role IN ('enterprise_architect', 'arb_admin')
-           ))
-    )
-  );
-
-DROP POLICY IF EXISTS "Update own actions" ON actions;
-CREATE POLICY "Update own actions" ON actions 
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM reviews 
-      WHERE reviews.id = actions.review_id 
-      AND reviews.sa_user_id = auth.uid()
-    )
-  );
-
--- audit_log policies
-DROP POLICY IF EXISTS "Read audit_log via review" ON audit_log;
-CREATE POLICY "Read audit_log via review" ON audit_log
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM reviews
-      WHERE reviews.id = audit_log.review_id
-      AND (reviews.sa_user_id = auth.uid() OR
-           EXISTS (
-             SELECT 1 FROM users
-             WHERE users.id = auth.uid()
-             AND users.role IN ('enterprise_architect', 'arb_admin')
-           ))
-    )
-  );
-
--- ============================================================================
 -- TRIGGERS FOR AUDIT LOGGING
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION log_review_status_change()
 RETURNS TRIGGER AS $$
+DECLARE
+  current_user_id UUID;
+  current_user_role TEXT;
 BEGIN
+  -- For local development, use the sa_user_id from the review as the current user
+  current_user_id := NEW.sa_user_id;
+  current_user_role := 'sa';
+  
   IF OLD.status IS DISTINCT FROM NEW.status THEN
     INSERT INTO audit_log (review_id, user_id, user_role, action, old_status, new_status)
     VALUES (
       NEW.id,
-      auth.uid(),
-      COALESCE(
-        (SELECT role FROM users WHERE id = auth.uid()),
-        'system'
-      ),
+      current_user_id,
+      current_user_role,
       'status_changed',
       OLD.status,
       NEW.status
@@ -321,11 +211,8 @@ BEGIN
     INSERT INTO audit_log (review_id, user_id, user_role, action, old_decision, new_decision)
     VALUES (
       NEW.id,
-      auth.uid(),
-      COALESCE(
-        (SELECT role FROM users WHERE id = auth.uid()),
-        'system'
-      ),
+      current_user_id,
+      current_user_role,
       'decision_changed',
       OLD.decision,
       NEW.decision
@@ -334,7 +221,7 @@ BEGIN
   
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trigger_review_status_change ON reviews;
 CREATE TRIGGER trigger_review_status_change
@@ -353,6 +240,12 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trigger_md_files_updated_at ON md_files;
 CREATE TRIGGER trigger_md_files_updated_at
   BEFORE UPDATE ON md_files
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trigger_users_updated_at ON users;
+CREATE TRIGGER trigger_users_updated_at
+  BEFORE UPDATE ON users
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 

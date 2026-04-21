@@ -8,7 +8,7 @@ import { Textarea } from '../components/ui/Textarea'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import ARBHeader from '../components/ARB/ARBHeader'
-import { reviewService } from '../services/reviewService'
+import { reviewService } from '../services/backendConfig'
 
 export default function ARBSubmission() {
   const navigate = useNavigate()

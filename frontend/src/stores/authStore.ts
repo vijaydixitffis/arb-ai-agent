@@ -1,13 +1,16 @@
 import { create } from 'zustand'
 import { createClient } from '@supabase/supabase-js'
+import { pythonServices } from '../services/backendConfig'
 
 // Initialize Supabase client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-export const supabase = supabaseUrl && supabaseAnonKey 
+const supabase = supabaseUrl && supabaseAnonKey 
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null
+
+const BACKEND_TYPE = import.meta.env.VITE_BACKEND_TYPE || 'supabase'
 
 interface User {
   id: string
@@ -19,11 +22,13 @@ interface User {
 interface AuthState {
   user: User | null
   token: string | null
-  authMethod: 'demo' | 'supabase' | null
-  setAuth: (user: User, token: string, method: 'demo' | 'supabase') => void
+  authMethod: 'demo' | 'supabase' | 'python' | null
+  setAuth: (user: User, token: string, method: 'demo' | 'supabase' | 'python') => void
   logout: () => void
   loginWithSupabase: (email: string, password: string) => Promise<void>
+  loginWithPython: (email: string, password: string) => Promise<void>
   initializeSupabaseSession: () => Promise<void>
+  initializePythonSession: () => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -35,6 +40,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Sign out from Supabase if logged in with Supabase
     if (get().authMethod === 'supabase' && supabase) {
       await supabase.auth.signOut()
+    }
+    // Clear token for Python backend
+    if (get().authMethod === 'python') {
+      localStorage.removeItem('token')
     }
     set({ user: null, token: null, authMethod: null })
   },
@@ -64,6 +73,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       authMethod: 'supabase',
     })
   },
+  loginWithPython: async (email: string, password: string) => {
+    try {
+      const data = await pythonServices.api.login(email, password)
+      
+      set({
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.name,
+          role: data.user.role,
+        },
+        token: data.access_token,
+        authMethod: 'python',
+      })
+      
+      // Store token in localStorage for Python backend
+      localStorage.setItem('token', data.access_token)
+    } catch (error) {
+      throw error
+    }
+  },
   initializeSupabaseSession: async () => {
     if (!supabase) return
 
@@ -83,4 +113,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       })
     }
   },
+  initializePythonSession: async () => {
+    const token = localStorage.getItem('token')
+    if (!token) return
+
+    // For Python backend, we would need to validate the token
+    // For now, just set the token
+    set({
+      user: null, // User info would need to be fetched from backend
+      token,
+      authMethod: 'python',
+    })
+  },
 }))
+
+// Unified login function that uses the configured backend
+export const login = async (email: string, password: string) => {
+  const authStore = useAuthStore.getState()
+  
+  if (BACKEND_TYPE === 'python') {
+    return await authStore.loginWithPython(email, password)
+  } else {
+    return await authStore.loginWithSupabase(email, password)
+  }
+}
+
+// Unified session initialization
+export const initializeSession = async () => {
+  const authStore = useAuthStore.getState()
+  
+  if (BACKEND_TYPE === 'python') {
+    return await authStore.initializePythonSession()
+  } else {
+    return await authStore.initializeSupabaseSession()
+  }
+}

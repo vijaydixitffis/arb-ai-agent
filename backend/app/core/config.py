@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     ]
     
     # Database Configuration
-    DATABASE_URL: str = "sqlite:///./arb.db"
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/arb_ai_agent"
     
     class Config:
         env_file = ".env"

@@ -92,7 +92,7 @@ export const api = {
 
   // Reviews
   getReviews: () =>
-    apiRequest('/reviews'),
+    apiRequest('/reviews/'),
 
   getReview: (id: string) =>
     apiRequest(`/reviews/${id}`),

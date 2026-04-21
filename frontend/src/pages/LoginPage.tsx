@@ -1,13 +1,12 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
+import { login } from '../stores/authStore'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const loginWithSupabase = useAuthStore((state) => state.loginWithSupabase)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -19,7 +18,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      await loginWithSupabase(email, password)
+      await login(email, password)
       navigate('/dashboard')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.')
