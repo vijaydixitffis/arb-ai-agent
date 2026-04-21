@@ -28,7 +28,7 @@ export interface ReviewResult {
 
 export interface ReviewStatus {
   id: string
-  status: 'pending' | 'in_review' | 'ea_review' | 'approved' | 'rejected' | 'deferred'
+  status: 'pending' | 'in_review' | 'submitted' | 'ea_review' | 'approved' | 'rejected' | 'deferred'
   decision: string | null
   report_json: any
   domain_scores: any[]
