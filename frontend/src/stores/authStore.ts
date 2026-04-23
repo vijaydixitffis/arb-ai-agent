@@ -1,18 +1,11 @@
 import { create } from 'zustand'
 import { pythonServices } from '../services/backendConfig'
+import { supabase as supabaseClient } from '../services/supabase/supabase'
 
 const BACKEND_TYPE = import.meta.env.VITE_BACKEND_TYPE || 'supabase'
 
-// Only import and initialize Supabase if backend type is supabase
-let supabase: any = null
-if (BACKEND_TYPE === 'supabase') {
-  const { createClient } = require('@supabase/supabase-js')
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-  supabase = supabaseUrl && supabaseAnonKey 
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null
-}
+// Use the conditional Supabase client from supabase.ts
+const supabase = supabaseClient
 
 interface User {
   id: string
