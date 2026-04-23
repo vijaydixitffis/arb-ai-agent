@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
-import { useAuthStore } from './stores/authStore'
+import { useAuthStore, initializeSession } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import ARBSubmission from './pages/ARBSubmission'
@@ -28,12 +28,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const initializeSupabaseSession = useAuthStore((state) => state.initializeSupabaseSession)
-  
   useEffect(() => {
-    // Initialize Supabase session on app load
-    initializeSupabaseSession()
-  }, [initializeSupabaseSession])
+    // Initialize session based on configured backend type
+    initializeSession()
+  }, [])
 
   console.log('App component rendering')
   return (

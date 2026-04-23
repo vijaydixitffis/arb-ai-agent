@@ -346,8 +346,8 @@ INSERT INTO artefact_templates (domain_id, artefact_type_id, name, description, 
 SELECT 
   (SELECT id FROM domains WHERE slug = 'general'),
   (SELECT id FROM artefact_types WHERE value = 't-doc'),
-  'Architecture Principles Doc',
-  'Enterprise architecture principles documentation',
+  'Solution Architecture HLD',
+  'Solution Architecture High Level Design document',
   true,
   0
 ON CONFLICT (domain_id, name) DO NOTHING;
