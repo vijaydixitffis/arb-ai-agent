@@ -48,6 +48,8 @@ export default function ReviewDashboard() {
     target_date: '2024-06-01',
   }
 
+  // Mock data - in production, fetch from API
+  // TODO: Update to use dynamic domains from metadata when API integration is implemented
   const validationResults = {
     application: { compliance: 'PARTIALLY_COMPLIANT', score: 75, gaps: ['Missing SBOM documentation'] },
     integration: { compliance: 'COMPLIANT', score: 85, gaps: [] },
@@ -57,6 +59,7 @@ export default function ReviewDashboard() {
     devsecops: { compliance: 'COMPLIANT', score: 85, gaps: [] },
   }
 
+  // TODO: Update to use dynamic NFR categories from metadata when API integration is implemented
   const nfrScores = {
     scalability: { status: 'GREEN', score: 4 },
     ha_dr: { status: 'AMBER', score: 3 },

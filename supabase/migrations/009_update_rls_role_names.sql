@@ -26,10 +26,17 @@ DROP POLICY IF EXISTS "EA and ARB Admin can update findings" ON findings;
 -- REVIEWS TABLE RLS
 -- ============================================================================
 
--- Allow all authenticated users to read reviews
-CREATE POLICY "All authenticated users can read reviews"
+-- SA can only view their own reviews
+-- EA and ARB Admin can view all reviews
+CREATE POLICY "SA can read own reviews, EA and ARB Admin can read all reviews"
 ON reviews FOR SELECT
-USING (auth.uid() IS NOT NULL);
+USING (
+  auth.uid() = sa_user_id
+  OR auth.uid() IN (
+    SELECT id FROM auth.users 
+    WHERE raw_user_meta_data->>'role' IN ('enterprise_architect', 'arb_admin')
+  )
+);
 
 -- Allow EA and ARB Admin to update reviews
 CREATE POLICY "EA and ARB Admin can update reviews"

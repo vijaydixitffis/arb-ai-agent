@@ -258,31 +258,20 @@ export const reviewService = {
   /**
    * Extract scope tags from form data
    * Maps frontend domain sections to scope tags
+   * Uses dynamic domain_data structure
    */
   extractScopeTags(formData: any): string[] {
     const tags: string[] = []
 
-    // Always include general
-    tags.push('general')
-
-    // Add domains based on checklist data
-    const domains = [
-      'business',
-      'application',
-      'integration',
-      'data',
-      'security',
-      'infrastructure',
-      'devsecops',
-      'nfr'
-    ]
-
-    domains.forEach(domain => {
-      const checklistKey = `${domain}_checklist`
-      if (formData[checklistKey] && Object.keys(formData[checklistKey]).length > 0) {
-        tags.push(domain)
-      }
-    })
+    // Check for dynamic domain_data structure
+    if (formData.domain_data) {
+      Object.keys(formData.domain_data).forEach(domain => {
+        if (formData.domain_data[domain].checklist && 
+            Object.keys(formData.domain_data[domain].checklist).length > 0) {
+          tags.push(domain)
+        }
+      })
+    }
 
     return tags
   },
