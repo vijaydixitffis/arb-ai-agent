@@ -1,5 +1,13 @@
 import { supabase } from './supabase'
 
+// Helper function to ensure Supabase is available
+const ensureSupabase = () => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured. Please set VITE_BACKEND_TYPE=supabase and provide Supabase credentials.')
+  }
+  return supabase
+}
+
 export interface ReviewData {
   solution_name: string
   scope_tags: string[]
@@ -44,7 +52,7 @@ export const reviewService = {
    * Create a new draft review record in Supabase
    */
   async createDraft(data: DraftData) {
-    const { data: review, error } = await supabase
+    const { data: review, error } = await ensureSupabase()
       .from('reviews')
       .insert({
         solution_name: data.solution_name,
@@ -74,7 +82,7 @@ export const reviewService = {
     if (data.status) updateData.status = data.status
     if (data.form_data) {
       // Preserve existing form_data and merge with new data
-      const { data: existingReview } = await supabase
+      const { data: existingReview } = await ensureSupabase()
         .from('reviews')
         .select('report_json')
         .eq('id', reviewId)
@@ -84,7 +92,7 @@ export const reviewService = {
       updateData.report_json = { form_data: { ...existingFormData, ...data.form_data } }
     }
 
-    const { data: review, error } = await supabase
+    const { data: review, error } = await ensureSupabase()
       .from('reviews')
       .update(updateData)
       .eq('id', reviewId)
@@ -104,7 +112,7 @@ export const reviewService = {
     missingFields: string[]
     errors: string[]
   }> {
-    const { data: review, error } = await supabase
+    const { data: review, error } = await ensureSupabase()
       .from('reviews')
       .select('*')
       .eq('id', reviewId)
@@ -167,7 +175,7 @@ export const reviewService = {
     }
 
     // Update status to submitted (this will be the trigger point)
-    const { error: updateError } = await supabase
+    const { error: updateError } = await ensureSupabase()
       .from('reviews')
       .update({ 
         status: 'submitted',
@@ -187,7 +195,7 @@ export const reviewService = {
    * Create a new review record in Supabase (for direct submission)
    */
   async createReview(data: ReviewData) {
-    const { data: review, error } = await supabase
+    const { data: review, error } = await ensureSupabase()
       .from('reviews')
       .insert({
         solution_name: data.solution_name,
@@ -213,7 +221,7 @@ export const reviewService = {
   async uploadArtifact(reviewId: string, file: File) {
     const filePath = `${reviewId}/${file.name}`
     
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .storage
       .from('review-artifacts')
       .upload(filePath, file, {
@@ -241,7 +249,7 @@ export const reviewService = {
     artifact_file_type: string
     artifact_file_size_bytes: number
   }) {
-    const { error } = await supabase
+    const { error } = await ensureSupabase()
       .from('reviews')
       .update({
         artifact_path: artifactInfo.artifact_path,
@@ -259,7 +267,7 @@ export const reviewService = {
    * Trigger the review-orchestrator edge function
    */
   async triggerReviewOrchestrator(reviewId: string): Promise<ReviewResult> {
-    const { data, error } = await supabase.functions.invoke('review-orchestrator', {
+    const { data, error } = await ensureSupabase().functions.invoke('review-orchestrator', {
       body: { reviewId }
     })
 
@@ -271,7 +279,7 @@ export const reviewService = {
    * Get review status and related data
    */
   async getReviewStatus(reviewId: string): Promise<ReviewStatus> {
-    const { data: review, error: reviewError } = await supabase
+    const { data: review, error: reviewError } = await ensureSupabase()
       .from('reviews')
       .select('*')
       .eq('id', reviewId)
@@ -281,10 +289,10 @@ export const reviewService = {
 
     // Fetch related data in parallel
     const [domainScores, findings, adrs, actions] = await Promise.all([
-      supabase.from('domain_scores').select('*').eq('review_id', reviewId),
-      supabase.from('findings').select('*').eq('review_id', reviewId),
-      supabase.from('adrs').select('*').eq('review_id', reviewId),
-      supabase.from('actions').select('*').eq('review_id', reviewId)
+      ensureSupabase().from('domain_scores').select('*').eq('review_id', reviewId),
+      ensureSupabase().from('findings').select('*').eq('review_id', reviewId),
+      ensureSupabase().from('adrs').select('*').eq('review_id', reviewId),
+      ensureSupabase().from('actions').select('*').eq('review_id', reviewId)
     ])
 
     return {
@@ -350,13 +358,13 @@ export const reviewService = {
    * Get all reviews for current user
    */
   async getUserReviews() {
-    const { data: { user: supabaseUser } } = await supabase.auth.getUser()
+    const { data: { user: supabaseUser } } = await ensureSupabase().auth.getUser()
     
     if (!supabaseUser?.id) {
       return []
     }
     
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('reviews')
       .select('*')
       .eq('sa_user_id', supabaseUser.id)
@@ -367,7 +375,7 @@ export const reviewService = {
   },
 
   async getAllReviews() {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('reviews')
       .select('*')
       .order('created_at', { ascending: false })
@@ -380,7 +388,7 @@ export const reviewService = {
    * Get review by ID with full details
    */
   async getReviewById(reviewId: string) {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('reviews')
       .select('*')
       .eq('id', reviewId)
@@ -437,7 +445,7 @@ export const reviewService = {
    * Get artifact download URL
    */
   async getArtifactDownloadUrl(reviewId: string, fileName: string) {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .storage
       .from('review-artifacts')
       .createSignedUrl(`${reviewId}/${fileName}`, 3600) // 1 hour expiry

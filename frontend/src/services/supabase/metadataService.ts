@@ -1,5 +1,13 @@
 import { supabase } from './supabase'
 
+// Helper function to ensure Supabase is available
+const ensureSupabase = () => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured. Please set VITE_BACKEND_TYPE=supabase and provide Supabase credentials.')
+  }
+  return supabase
+}
+
 export interface Step {
   id: string
   step_order: number
@@ -129,7 +137,7 @@ export interface FormField {
 
 export const metadataService = {
   async getSteps(): Promise<Step[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('submission_steps')
       .select('*')
       .eq('is_active', true)
@@ -140,7 +148,7 @@ export const metadataService = {
   },
 
   async getDomains(): Promise<Domain[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('domains')
       .select('*')
       .eq('is_active', true)
@@ -151,7 +159,7 @@ export const metadataService = {
   },
 
   async getDomainsForStep(stepId: string): Promise<Domain[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('domain_steps')
       .select('domains(*)')
       .eq('step_id', stepId)
@@ -162,7 +170,7 @@ export const metadataService = {
   },
 
   async getStepToDomainMapping(): Promise<Record<number, string>> {
-    const { data: stepsData, error: stepsError } = await supabase
+    const { data: stepsData, error: stepsError } = await ensureSupabase()
       .from('submission_steps')
       .select('id, step_order')
       .eq('is_active', true)
@@ -170,7 +178,7 @@ export const metadataService = {
     
     if (stepsError) throw stepsError
 
-    const { data: domainStepsData, error: domainStepsError } = await supabase
+    const { data: domainStepsData, error: domainStepsError } = await ensureSupabase()
       .from('domain_steps')
       .select('step_id, domains(slug)')
       .eq('is_active', true)
@@ -189,7 +197,7 @@ export const metadataService = {
   },
 
   async getArtefactTypes(): Promise<ArtefactType[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('artefact_types')
       .select('*')
       .eq('is_active', true)
@@ -199,34 +207,19 @@ export const metadataService = {
     return data
   },
 
-  async getArtefactTemplates(domainSlug: string): Promise<ArtefactTemplate[]> {
-    // First get the domain ID
-    const { data: domainData, error: domainError } = await supabase
-      .from('domains')
-      .select('id')
-      .eq('slug', domainSlug)
-      .single()
-    
-    if (domainError) throw domainError
-    
-    // Then get artefact templates for that domain
-    const { data, error } = await supabase
+  async getArtefactTemplates(domainId: string): Promise<ArtefactTemplate[]> {
+    const { data, error } = await ensureSupabase()
       .from('artefact_templates')
-      .select('*, artefact_types(*)')
-      .eq('domain_id', domainData.id)
+      .select('*')
       .eq('is_active', true)
-      .order('sort_order')
+      .order('value')
     
     if (error) throw error
-    return data.map((at: any) => ({
-      ...at,
-      artefact_type: at.artefact_types
-    }))
+    return data
   },
 
   async getChecklistSubsections(domainSlug: string): Promise<ChecklistSubsection[]> {
-    // First get the domain ID
-    const { data: domainData, error: domainError } = await supabase
+    const { data: domainData, error: domainError } = await ensureSupabase()
       .from('domains')
       .select('id')
       .eq('slug', domainSlug)
@@ -234,8 +227,7 @@ export const metadataService = {
     
     if (domainError) throw domainError
     
-    // Get subsections for that domain
-    const { data: subsections, error: subsectionsError } = await supabase
+    const { data: subsections, error: subsectionsError } = await ensureSupabase()
       .from('checklist_subsections')
       .select('*')
       .eq('domain_id', domainData.id)
@@ -244,9 +236,8 @@ export const metadataService = {
     
     if (subsectionsError) throw subsectionsError
     
-    // Get questions for these subsections
     const subsectionIds = subsections.map((s: any) => s.id)
-    const { data: questions, error: questionsError } = await supabase
+    const { data: questions, error: questionsError } = await ensureSupabase()
       .from('checklist_questions')
       .select('*')
       .in('subsection_id', subsectionIds)
@@ -255,8 +246,7 @@ export const metadataService = {
     
     if (questionsError) throw questionsError
     
-    // Get all question options
-    const { data: questionOptions, error: optionsError } = await supabase
+    const { data: questionOptions, error: optionsError } = await ensureSupabase()
       .from('question_options')
       .select('*')
       .eq('is_active', true)
@@ -264,7 +254,6 @@ export const metadataService = {
     
     if (optionsError) throw optionsError
     
-    // Map options to questions
     const optionsByQuestion = questionOptions.reduce((acc: any, option: any) => {
       if (!acc[option.question_id]) {
         acc[option.question_id] = []
@@ -273,7 +262,6 @@ export const metadataService = {
       return acc
     }, {})
     
-    // Map questions to subsections
     const questionsBySubsection = questions.reduce((acc: any, question: any) => {
       if (!acc[question.subsection_id]) {
         acc[question.subsection_id] = []
@@ -291,19 +279,19 @@ export const metadataService = {
     }))
   },
 
-  async getPtxGates(): Promise<{ value: string; label: string }[]> {
-    const { data, error } = await supabase
+  async getPTXGates(): Promise<{ value: string; label: string }[]> {
+    const { data, error } = await ensureSupabase()
       .from('ptx_gates')
-      .select('value, label')
+      .select('*')
       .eq('is_active', true)
-      .order('sort_order')
+      .order('slug')
     
     if (error) throw error
     return data
   },
 
   async getArchitectureDispositions(): Promise<{ value: string; label: string }[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('architecture_dispositions')
       .select('value, label')
       .eq('is_active', true)
@@ -314,7 +302,7 @@ export const metadataService = {
   },
 
   async getEAPrinciples(): Promise<EAPrinciple[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('ea_principles')
       .select('*')
       .eq('is_active', true)
@@ -325,7 +313,7 @@ export const metadataService = {
   },
 
   async getEAPrinciplesForDomain(domainSlug: string): Promise<EAPrinciple[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('principle_domains')
       .select('ea_principles(*), relevance_score')
       .eq('domains.slug', domainSlug)
@@ -341,7 +329,7 @@ export const metadataService = {
   },
 
   async getFormFields(stepId: string): Promise<FormField[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('form_fields')
       .select('*')
       .eq('step_id', stepId)
@@ -353,7 +341,7 @@ export const metadataService = {
   },
 
   async getQuestionOptions(questionId: string): Promise<QuestionOption[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('question_options')
       .select('*')
       .eq('question_id', questionId)
@@ -365,7 +353,7 @@ export const metadataService = {
   },
 
   async getAllQuestionOptions(): Promise<QuestionOption[]> {
-    const { data, error } = await supabase
+    const { data, error } = await ensureSupabase()
       .from('question_options')
       .select('*')
       .eq('is_active', true)
@@ -380,7 +368,7 @@ export const metadataService = {
       this.getSteps(),
       this.getDomains(),
       this.getArtefactTypes(),
-      this.getPtxGates(),
+      this.getPTXGates(),
       this.getArchitectureDispositions(),
       this.getEAPrinciples(),
       this.getAllQuestionOptions()
