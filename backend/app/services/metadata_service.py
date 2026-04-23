@@ -36,12 +36,20 @@ class MetadataService:
     # DOMAINS
     # ============================================================================
     def get_domains(self) -> List[DomainModel]:
-        """Get all domains ordered by slug"""
+        """Get all domains ordered by seq_number"""
         domains = self.db.query(Domain)\
             .filter(Domain.is_active == True)\
-            .order_by(Domain.slug)\
+            .order_by(Domain.seq_number)\
             .all()
         return [DomainModel.model_validate(domain) for domain in domains]
+
+    def get_domain_by_seq_number(self, seq_number: int) -> Optional[DomainModel]:
+        """Get a domain by its sequence number"""
+        domain = self.db.query(Domain)\
+            .filter(Domain.seq_number == seq_number)\
+            .filter(Domain.is_active == True)\
+            .first()
+        return DomainModel.model_validate(domain) if domain else None
 
     def get_domains_for_step(self, step_id: str) -> List[DomainModel]:
         """Get domains associated with a specific step"""
@@ -284,7 +292,6 @@ class MetadataService:
     # ============================================================================
     def get_all_metadata(self) -> Dict[str, Any]:
         """Get all metadata in a single call"""
-        steps = self.get_steps()
         domains = self.get_domains()
         artefact_types = self.get_artefact_types()
         ptx_gates = self.get_ptx_gates()
@@ -293,7 +300,6 @@ class MetadataService:
         question_options = self.get_all_question_options()
         
         return {
-            "steps": steps,
             "domains": domains,
             "artefactTypes": artefact_types,
             "ptxGates": ptx_gates,

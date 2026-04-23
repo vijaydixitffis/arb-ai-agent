@@ -29,6 +29,7 @@ class Domain(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     icon: Optional[str] = None
+    seq_number: Optional[int] = None
     is_active: bool = True
     created_at: datetime
     updated_at: datetime

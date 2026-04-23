@@ -41,6 +41,14 @@ async def get_domains(current_user: str = Depends(get_current_user), db: Session
     service = MetadataService(db)
     return service.get_domains()
 
+@router.get("/domains/seq-number/{seq_number}")
+async def get_domain_by_seq_number(seq_number: int, current_user: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get a domain by its sequence number"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    service = MetadataService(db)
+    return service.get_domain_by_seq_number(seq_number)
+
 @router.get("/domains/step/{step_id}")
 async def get_domains_for_step(step_id: str, current_user: str = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get domains for a specific step"""

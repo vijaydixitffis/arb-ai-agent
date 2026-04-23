@@ -13,7 +13,7 @@ interface ARBHeaderProps {
 
 export default function ARBHeader({ currentStep, setCurrentStep, progress, onSaveDraft }: ARBHeaderProps) {
   const navigate = useNavigate()
-  const { steps } = useMetadataStore()
+  const { domains } = useMetadataStore()
 
   return (
     <header className="bg-white border-b">
@@ -38,22 +38,41 @@ export default function ARBHeader({ currentStep, setCurrentStep, progress, onSav
       {/* Stepper */}
       <div className="max-w-7xl mx-auto px-4 py-4">
         <div className="flex gap-2">
-          {steps.map((step) => (
-            <button
-              key={step.id}
-              onClick={() => setCurrentStep(step.step_order)}
-              title={step.description}
-              className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all whitespace-nowrap ${
-                step.step_order === currentStep
-                  ? 'bg-primary text-primary-foreground shadow-md'
-                  : step.step_order < currentStep
-                  ? 'bg-primary/20 text-primary border border-primary/30'
-                  : 'bg-white text-gray-600 border border-gray-300 hover:border-primary/50'
-              }`}
-            >
-              {step.title}
-            </button>
-          ))}
+          {/* Project Info Step */}
+          <button
+            onClick={() => setCurrentStep(1)}
+            title="Project Information"
+            className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all whitespace-nowrap ${
+              currentStep === 1
+                ? 'bg-primary text-primary-foreground shadow-md'
+                : currentStep > 1
+                ? 'bg-primary/20 text-primary border border-primary/30'
+                : 'bg-white text-gray-600 border border-gray-300 hover:border-primary/50'
+            }`}
+          >
+            <span className="mr-1">📋</span>
+            Project Info
+          </button>
+          {/* Domain Steps */}
+          {domains
+            .sort((a, b) => a.seq_number - b.seq_number)
+            .map((domain) => (
+              <button
+                key={domain.id}
+                onClick={() => setCurrentStep(domain.seq_number + 1)}
+                title={domain.description}
+                className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-all whitespace-nowrap ${
+                  currentStep === domain.seq_number + 1
+                    ? 'bg-primary text-primary-foreground shadow-md'
+                    : currentStep > domain.seq_number + 1
+                    ? 'bg-primary/20 text-primary border border-primary/30'
+                    : 'bg-white text-gray-600 border border-gray-300 hover:border-primary/50'
+                }`}
+              >
+                <span className="mr-1">{domain.icon}</span>
+                {domain.name}
+              </button>
+            ))}
         </div>
       </div>
     </header>

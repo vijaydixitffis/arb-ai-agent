@@ -1,8 +1,7 @@
 import { create } from 'zustand'
-import { metadataService, Step, Domain, ArtefactType, ArtefactTemplate, ChecklistSubsection, EAPrinciple, FormField, QuestionOption } from '../services/backendConfig'
+import { metadataService, Domain, ArtefactType, ArtefactTemplate, ChecklistSubsection, EAPrinciple, FormField, QuestionOption } from '../services/backendConfig'
 
 interface MetadataState {
-  steps: Step[]
   domains: Domain[]
   artefactTypes: ArtefactType[]
   artefactTemplatesByDomain: Record<string, ArtefactTemplate[]>
@@ -14,7 +13,6 @@ interface MetadataState {
   formFieldsByStep: Record<string, FormField[]>
   questionOptionsByQuestion: Record<string, QuestionOption[]>
   questionOptions: QuestionOption[]
-  stepToDomainMapping: Record<number, string>
   loading: boolean
   error: string | null
   
@@ -22,12 +20,11 @@ interface MetadataState {
   loadDomainMetadata: (domainSlug: string) => Promise<void>
   loadStepMetadata: (stepId: string) => Promise<void>
   loadEAPrinciplesForDomain: (domainSlug: string) => Promise<void>
-  getStepById: (id: string) => Step | undefined
+  getDomainBySeqNumber: (seqNumber: number) => Domain | undefined
   getDomainBySlug: (slug: string) => Domain | undefined
 }
 
 export const useMetadataStore = create<MetadataState>((set, get) => ({
-  steps: [],
   domains: [],
   artefactTypes: [],
   artefactTemplatesByDomain: {},
@@ -39,7 +36,6 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
   formFieldsByStep: {},
   questionOptionsByQuestion: {},
   questionOptions: [],
-  stepToDomainMapping: {},
   loading: false,
   error: null,
 
@@ -47,10 +43,8 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const metadata = await metadataService.getAllMetadata()
-      const stepToDomainMapping = await metadataService.getStepToDomainMapping()
       set({ 
         ...metadata, 
-        stepToDomainMapping,
         loading: false 
       })
     } catch (error) {
@@ -116,8 +110,8 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
     }
   },
 
-  getStepById: (id: string) => {
-    return get().steps.find(step => step.id === id)
+  getDomainBySeqNumber: (seqNumber: number) => {
+    return get().domains.find(domain => domain.seq_number === seqNumber)
   },
 
   getDomainBySlug: (slug: string) => {

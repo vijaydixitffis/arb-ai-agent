@@ -18,6 +18,7 @@ export interface Domain {
   description: string
   color: string
   icon: string
+  seq_number: number
   is_active: boolean
   created_at: string
   updated_at: string
@@ -134,6 +135,14 @@ export const metadataService = {
 
   async getDomains(): Promise<Domain[]> {
     return await apiRequest('/metadata/domains')
+  },
+
+  async getDomainBySeqNumber(seqNumber: number): Promise<Domain | null> {
+    try {
+      return await apiRequest(`/metadata/domains/seq-number/${seqNumber}`)
+    } catch {
+      return null
+    }
   },
 
   async getDomainsForStep(stepId: string): Promise<Domain[]> {
