@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { metadataService, Domain, ArtefactType, ArtefactTemplate, ChecklistSubsection, EAPrinciple, FormField, QuestionOption } from '../services/backendConfig'
 
 interface MetadataState {
-  steps: any[]
   domains: Domain[]
   artefactTypes: ArtefactType[]
   artefactTemplatesByDomain: Record<string, ArtefactTemplate[]>
@@ -26,7 +25,6 @@ interface MetadataState {
 }
 
 export const useMetadataStore = create<MetadataState>((set, get) => ({
-  steps: [],
   domains: [],
   artefactTypes: [],
   artefactTemplatesByDomain: {},
@@ -45,10 +43,8 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const metadata = await metadataService.getAllMetadata()
-      const steps = await metadataService.getSteps()
       set({ 
         ...metadata, 
-        steps,
         loading: false 
       })
     } catch (error) {

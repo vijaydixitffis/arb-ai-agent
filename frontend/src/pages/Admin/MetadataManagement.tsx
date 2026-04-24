@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Ca
 import { Button } from '../../components/ui/Button'
 
 export default function MetadataManagement() {
-  const { steps, domains, artefactTypes, loadMetadata } = useMetadataStore()
+  const { domains, artefactTypes, loadMetadata } = useMetadataStore()
 
   useEffect(() => {
     loadMetadata()
@@ -18,26 +18,6 @@ export default function MetadataManagement() {
       </div>
 
       <div className="grid gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Submission Steps</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {steps.map((step: any) => (
-                <div key={step.id} className="flex items-center justify-between p-3 border rounded">
-                  <div>
-                    <p className="font-medium">{step.title}</p>
-                    <p className="text-sm text-gray-500">{step.description}</p>
-                  </div>
-                  <Button variant="outline" size="sm">Edit</Button>
-                </div>
-              ))}
-              <Button className="mt-4">Add Step</Button>
-            </div>
-          </CardContent>
-        </Card>
-
         <Card>
           <CardHeader>
             <CardTitle>Domains</CardTitle>

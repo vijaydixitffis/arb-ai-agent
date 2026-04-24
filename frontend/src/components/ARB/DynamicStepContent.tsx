@@ -9,16 +9,13 @@ interface DynamicStepContentProps {
 }
 
 export default function DynamicStepContent({ currentStep, formData, setFormData }: DynamicStepContentProps) {
-  const { steps, domains, loadDomainMetadata, artefactTemplatesByDomain, checklistSubsectionsByDomain } = useMetadataStore()
+  const { domains, loadDomainMetadata, artefactTemplatesByDomain, checklistSubsectionsByDomain } = useMetadataStore()
   const location = useLocation()
   
-  const step = steps[currentStep - 1]
   const ptxGate = location.state?.ptxGate || ''
   const architectureDisposition = location.state?.architectureDisposition || ''
 
   useEffect(() => {
-    if (!step) return
-
     // Load domain-specific metadata when entering a domain step
     if (currentStep >= 2 && currentStep <= 8) {
       const domain = domains[currentStep - 2]
@@ -30,18 +27,16 @@ export default function DynamicStepContent({ currentStep, formData, setFormData 
     if (currentStep === 9 && !artefactTemplatesByDomain['nfr']) {
       loadDomainMetadata('nfr')
     }
-  }, [currentStep, domains, artefactTemplatesByDomain, loadDomainMetadata, step])
+  }, [currentStep, domains, artefactTemplatesByDomain, loadDomainMetadata])
 
   const renderStepContent = () => {
-    if (!step) return <div className="text-center py-8">Loading...</div>
-
-    switch (step.step_order) {
+    switch (currentStep) {
       case 1:
         return <SolutionContextStep formData={formData} setFormData={setFormData} ptxGate={ptxGate} architectureDisposition={architectureDisposition} />
       case 9:
         return <NFRStep formData={formData} setFormData={setFormData} artefactTemplates={artefactTemplatesByDomain['nfr'] || []} checklistSubsections={checklistSubsectionsByDomain['nfr'] || []} />
       default:
-        const domain = domains[step.step_order - 2]
+        const domain = domains[currentStep - 2]
         if (!domain) return null
         return (
           <DomainStep 
