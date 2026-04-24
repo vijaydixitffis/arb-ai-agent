@@ -1,7 +1,10 @@
 from fastapi import APIRouter, HTTPException, Header, Depends
 from typing import Dict, Any, Optional
-from app.agents.orchestrator import orchestrator
+from sqlalchemy.orm import Session
+from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.agents.enhanced_orchestrator import EnhancedARBOrchestrator
+from app.services.review_service import ReviewService
 
 router = APIRouter()
 
@@ -18,37 +21,39 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Optio
     return payload.get("sub")
 
 @router.post("/review")
-async def run_arb_review(submission_data: Dict[str, Any], current_user: str = Depends(get_current_user)):
-    """Run AI agent ARB review pipeline"""
+async def trigger_review(
+    request: Dict[str, str],
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Trigger ARB review orchestrator for a given review"""
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
+    
+    review_id = request.get("reviewId")
+    if not review_id:
+        raise HTTPException(status_code=400, detail="reviewId is required")
+    
     try:
-        submission_id = submission_data.get("submission_id")
-        artefacts = submission_data.get("artefacts", [])
-        domain_sections = submission_data.get("domain_sections", {})
+        # Initialize orchestrator
+        orchestrator = EnhancedARBOrchestrator(db)
         
-        if not submission_id:
-            raise HTTPException(status_code=400, detail="submission_id is required")
-        
-        # Run the orchestrator pipeline
+        # Run the review evaluation
         result = await orchestrator.run_review(
-            submission_id=submission_id,
-            artefacts=artefacts,
-            domain_sections=domain_sections
+            review_id=review_id,
+            checklist_data=await orchestrator.prepare_checklist_data(review_id)
         )
         
         return {
-            "submission_id": submission_id,
-            "status": "review_completed",
-            "validation_results": result.get("validation_results"),
-            "nfr_scores": result.get("nfr_scores"),
+            "success": True,
+            "reviewId": review_id,
             "decision": result.get("decision"),
-            "adrs": result.get("adrs"),
-            "action_register": result.get("action_register")
+            "report": result,
+            "tokensUsed": result.get("total_tokens_used", 0)
         }
-    
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Review pipeline error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Review orchestration failed: {str(e)}")
 
 @router.post("/populate-knowledge-base")
 async def populate_knowledge_base(current_user: str = Depends(get_current_user)):

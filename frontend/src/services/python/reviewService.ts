@@ -1,12 +1,9 @@
 import { apiRequest } from './api'
+import { artefactService, ArtefactResponse } from './artefactService'
 
 export interface ReviewData {
   solution_name: string
   scope_tags: string[]
-  artifact_path: string
-  artifact_filename: string
-  artifact_file_type: string
-  artifact_file_size_bytes?: number
   sa_user_id: string
   llm_model?: string
 }
@@ -111,41 +108,22 @@ export const reviewService = {
   },
 
   /**
-   * Upload artifact to Python backend
+   * Upload artefacts using the new artefact service
    */
-  async uploadArtifact(reviewId: string, file: File) {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('reviewId', reviewId)
-    
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/reviews/${reviewId}/artifact`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: formData
-    })
-
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`)
-    }
-
-    return await response.json()
+  async uploadArtefacts(reviewId: string, artefacts: {
+    domain: string
+    name: string
+    type: string
+    file: File
+  }[]): Promise<ArtefactResponse[]> {
+    return await artefactService.uploadMultipleArtefacts(reviewId, artefacts)
   },
 
   /**
-   * Update review with artifact information
+   * Get artefacts for a review
    */
-  async updateReviewArtifactInfo(reviewId: string, artifactInfo: {
-    artifact_path: string
-    artifact_filename: string
-    artifact_file_type: string
-    artifact_file_size_bytes: number
-  }) {
-    return await apiRequest(`/reviews/${reviewId}`, {
-      method: 'PUT',
-      body: JSON.stringify(artifactInfo)
-    })
+  async getReviewArtefacts(reviewId: string): Promise<ArtefactResponse[]> {
+    return await artefactService.getReviewArtefacts(reviewId)
   },
 
   /**
@@ -197,40 +175,36 @@ export const reviewService = {
         try {
           const status = await this.getReviewStatus(reviewId)
           onUpdate(status)
-
-          // Check if review is complete (including submitted as terminal for mock data)
-          if (status.status === 'submitted' ||
-              status.status === 'ea_review' || 
-              status.status === 'approved' || 
-              status.status === 'rejected' || 
+          
+          // If review is complete, resolve
+          if (status.status === 'approved' || status.status === 'rejected' || 
               status.status === 'deferred') {
             resolve(status)
             return
           }
-
-          // Check if max attempts reached
+          
+          // If max attempts reached, resolve with current status
           if (attempts >= maxAttempts) {
-            reject(new Error('Polling timeout: Review did not complete in time'))
+            resolve(status)
             return
           }
-
+          
           // Continue polling
           setTimeout(poll, intervalMs)
         } catch (error) {
           reject(error)
         }
       }
-
+      
       poll()
     })
   },
 
   /**
-   * Get all reviews for current user via Python backend
+   * Get reviews by user
    */
-  async getUserReviews() {
-    // Backend handles filtering by current_user from JWT token
-    return await apiRequest('/reviews/')
+  async getUserReviews(userId: string) {
+    return await apiRequest(`/reviews?user_id=${userId}`)
   },
 
   async getAllReviews() {

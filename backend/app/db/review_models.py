@@ -16,10 +16,6 @@ class Review(Base):
     sa_user_id = Column(UUID(as_uuid=True), nullable=True)
     solution_name = Column(String, nullable=False)
     scope_tags = Column(ARRAY(String), nullable=False)
-    artifact_path = Column(String, nullable=False)
-    artifact_filename = Column(String, nullable=False)
-    artifact_file_type = Column(String, nullable=True)
-    artifact_file_size_bytes = Column(Integer, nullable=True)
     
     status = Column(String, nullable=False, default='pending')
     decision = Column(String, nullable=True)

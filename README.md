@@ -142,3 +142,29 @@ The AI agent performs:
 ## License
 
 Internal Enterprise Architecture Tool
+
+I've added the following TODO items for implementing whole-diagram processing:
+
+📋 Medium Priority Tasks:
+#15: Implement whole-diagram processing for architecture diagrams
+#16: Add OCR support for text extraction from image diagrams
+#17: Create diagram-specific LLM prompts for visual analysis
+📋 Low Priority Task:
+#18: Add visual pattern recognition for architectural elements
+🎯 Implementation Plan (when ready):
+Whole-Diagram Processing (#15)
+Modify chunking logic to keep diagrams intact
+Increase LLM token limits for diagram content
+Add file type detection for diagrams
+OCR Integration (#16)
+Add Tesseract or similar OCR library
+Extract text from PNG/JPEG diagrams
+Combine OCR text with visual metadata
+Diagram-Specific Prompts (#17)
+Create specialized prompts for architecture diagram analysis
+Focus on visual elements, connections, patterns
+Domain-specific diagram validation criteria
+Visual Pattern Recognition (#18)
+Integrate with vision models (GPT-4V, Gemini Vision)
+Detect architectural components and relationships
+Automated compliance checking of visual elements

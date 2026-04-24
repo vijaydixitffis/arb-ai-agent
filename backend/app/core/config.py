@@ -8,8 +8,16 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4"
+    OPENAI_MODEL: str = "gpt-4o"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
+    
+    # Gemini Configuration
+    GEMINI_API_KEY: str
+    GEMINI_MODEL: str = "gemini-1.5-pro"
+    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    
+    # LLM Provider Selection
+    LLM_PROVIDER: str = "openai"  # Options: "openai", "gemini"
     
     # Vector Store Configuration
     CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
