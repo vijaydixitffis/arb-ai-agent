@@ -137,6 +137,17 @@ export interface FormField {
 }
 
 export const metadataService = {
+  async getSteps(): Promise<Step[]> {
+    const { data, error } = await ensureSupabase()
+      .from('steps')
+      .select('*')
+      .eq('is_active', true)
+      .order('step_order')
+    
+    if (error) throw error
+    return data
+  },
+
   async getDomains(): Promise<Domain[]> {
     const { data, error } = await ensureSupabase()
       .from('domains')

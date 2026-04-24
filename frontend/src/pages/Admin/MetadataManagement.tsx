@@ -24,7 +24,7 @@ export default function MetadataManagement() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {steps.map(step => (
+              {steps.map((step: any) => (
                 <div key={step.id} className="flex items-center justify-between p-3 border rounded">
                   <div>
                     <p className="font-medium">{step.title}</p>
