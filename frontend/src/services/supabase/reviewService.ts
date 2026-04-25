@@ -355,19 +355,21 @@ export const reviewService = {
   },
 
   /**
-   * Get all reviews for current user
+   * Get all reviews for current user (userId optional for compatibility with Python interface)
    */
-  async getUserReviews() {
+  async getUserReviews(userId?: string) {
     const { data: { user: supabaseUser } } = await ensureSupabase().auth.getUser()
     
-    if (!supabaseUser?.id) {
+    const targetUserId = userId || supabaseUser?.id
+    
+    if (!targetUserId) {
       return []
     }
     
     const { data, error } = await ensureSupabase()
       .from('reviews')
       .select('*')
-      .eq('sa_user_id', supabaseUser.id)
+      .eq('sa_user_id', targetUserId)
 
     if (error) throw error
     return data

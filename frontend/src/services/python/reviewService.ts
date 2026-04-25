@@ -108,6 +108,27 @@ export const reviewService = {
   },
 
   /**
+   * Upload a single artifact (for compatibility with Supabase interface)
+   */
+  async uploadArtifact(reviewId: string, file: File) {
+    const result = await artefactService.uploadArtefact({
+      review_id: reviewId,
+      domain_slug: 'general',
+      artefact_name: file.name,
+      artefact_type: file.type,
+      file
+    })
+    // Transform to match Supabase return structure
+    return {
+      path: result.filename,
+      fullPath: `${reviewId}/${result.filename}`,
+      fileName: result.filename,
+      fileType: result.file_type || file.type,
+      fileSize: result.file_size_bytes || file.size
+    }
+  },
+
+  /**
    * Upload artefacts using the new artefact service
    */
   async uploadArtefacts(reviewId: string, artefacts: {
@@ -117,6 +138,21 @@ export const reviewService = {
     file: File
   }[]): Promise<ArtefactResponse[]> {
     return await artefactService.uploadMultipleArtefacts(reviewId, artefacts)
+  },
+
+  /**
+   * Update review with artifact information (for compatibility with Supabase interface)
+   */
+  async updateReviewArtifactInfo(reviewId: string, artifactInfo: {
+    artifact_path: string
+    artifact_filename: string
+    artifact_file_type: string
+    artifact_file_size_bytes: number
+  }) {
+    return await apiRequest(`/reviews/${reviewId}`, {
+      method: 'PUT',
+      body: JSON.stringify(artifactInfo)
+    })
   },
 
   /**
@@ -201,10 +237,14 @@ export const reviewService = {
   },
 
   /**
-   * Get reviews by user
+   * Get reviews by user (userId optional for compatibility with Supabase interface)
    */
-  async getUserReviews(userId: string) {
-    return await apiRequest(`/reviews?user_id=${userId}`)
+  async getUserReviews(userId?: string) {
+    if (userId) {
+      return await apiRequest(`/reviews?user_id=${userId}`)
+    }
+    // If no userId provided, get all reviews (backend should filter by auth token)
+    return await apiRequest('/reviews')
   },
 
   async getAllReviews() {
