@@ -43,7 +43,7 @@ export const artefactService = {
     formData.append('artefact_type', data.artefact_type)
     formData.append('file', data.file)
     
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/artefacts/upload`, {
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/artefacts/artefacts/upload`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -62,7 +62,7 @@ export const artefactService = {
    * Get all artefacts for a review
    */
   async getReviewArtefacts(reviewId: string): Promise<ArtefactResponse[]> {
-    return await apiRequest(`/artefacts/review/${reviewId}`)
+    return await apiRequest(`/artefacts/artefacts/review/${reviewId}`)
   },
 
   /**
@@ -104,7 +104,7 @@ export const artefactService = {
    * Delete an artefact
    */
   async deleteArtefact(artefactId: string): Promise<void> {
-    await apiRequest(`/artefacts/${artefactId}`, {
+    await apiRequest(`/artefacts/artefacts/${artefactId}`, {
       method: 'DELETE'
     })
   }

@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "ARB AI Agent"
     
+    # Backend Configuration - ONLY PostgreSQL for Python backend
+    BACKEND_TYPE: str = "postgresql"
+    
     # OpenAI Configuration
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4o"
@@ -13,11 +16,14 @@ class Settings(BaseSettings):
     
     # Gemini Configuration
     GEMINI_API_KEY: str
-    GEMINI_MODEL: str = "gemini-1.5-pro"
-    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    GEMINI_MODEL: str = "gemini-2.0-flash"  # Updated from gemini-1.5-pro (deprecated)
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     
     # LLM Provider Selection
     LLM_PROVIDER: str = "openai"  # Options: "openai", "gemini"
+    
+    # PostgreSQL Configuration
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/arb_ai_agent"
     
     # Vector Store Configuration
     CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
@@ -38,11 +44,18 @@ class Settings(BaseSettings):
         "image/svg+xml"
     ]
     
-    # Database Configuration
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/arb_ai_agent"
-    
     class Config:
         env_file = ".env"
         case_sensitive = True
+
+    @property
+    def is_supabase(self) -> bool:
+        """Check if Supabase backend is configured"""
+        return self.BACKEND_TYPE.lower() == "supabase"
+    
+    @property
+    def is_supabase_storage(self) -> bool:
+        """Check if Supabase storage is configured"""
+        return self.STORAGE_TYPE.lower() == "supabase"
 
 settings = Settings()

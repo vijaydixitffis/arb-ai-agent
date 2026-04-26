@@ -8,7 +8,8 @@ import { Textarea } from '../components/ui/Textarea'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import ARBHeader from '../components/ARB/ARBHeader'
-import { reviewService } from '../services/backendConfig'
+import { reviewService } from '../services/python/reviewService'
+import { artefactService } from '../services/python/artefactService'
 
 export default function ARBSubmission() {
   const navigate = useNavigate()
@@ -34,10 +35,38 @@ export default function ARBSubmission() {
           const draftData = await reviewService.loadDraftData(state.reviewId)
           setSubmissionId(state.reviewId)
           
-          // Load form data from draft
+          // Load form data from draft and ensure reviewId is set
           if (draftData.formData) {
-            setFormData(draftData.formData)
+            setFormData({
+              ...formData,
+              ...draftData.formData,
+              reviewId: state.reviewId
+            })
+          } else {
+            // If no formData exists, at least set the reviewId
+            setFormData({ ...formData, reviewId: state.reviewId })
           }
+
+          // Load previously uploaded artefacts
+          const uploadedArtefacts = await artefactService.getReviewArtefacts(state.reviewId)
+          
+          // Group artefacts by domain - dynamically create keys for all domains found
+          const artefactsByDomain: Record<string, Array<{ id?: string; name: string; type: string; fileName: string; file: File | null }>> = {}
+          
+          uploadedArtefacts.forEach(artefact => {
+            if (!artefactsByDomain[artefact.domain_slug]) {
+              artefactsByDomain[artefact.domain_slug] = []
+            }
+            artefactsByDomain[artefact.domain_slug].push({
+              id: artefact.id,
+              name: artefact.artefact_name,
+              type: artefact.artefact_type,
+              fileName: artefact.filename,
+              file: null
+            })
+          })
+          
+          setArtefacts(artefactsByDomain)
         } catch (error) {
           console.error('Error loading draft:', error)
           alert('Failed to load draft data')
@@ -77,16 +106,7 @@ export default function ARBSubmission() {
       }
     }
   }, [currentStep, loadDomainMetadata, domains, getDomainBySeqNumber])
-  const [artefacts, setArtefacts] = useState<Record<string, Array<{ name: string; type: string; fileName: string; file: File | null }>>>({
-    general: [],
-    business: [],
-    application: [],
-    integration: [],
-    data: [],
-    infrastructure: [],
-    devsecops: [],
-    nfr: [],
-  })
+  const [artefacts, setArtefacts] = useState<Record<string, Array<{ id?: string; name: string; type: string; fileName: string; file: File | null }>>>({})
   const [newArtefact, setNewArtefact] = useState<{ domain: string; name: string; type: string; fileName: string; file: File | null }>({
     domain: '',
     name: '',
@@ -95,6 +115,9 @@ export default function ARBSubmission() {
     file: null,
   })
   const [formData, setFormData] = useState({
+    reviewId: '',
+    solution_name: '',
+    scope_tags: [] as string[],
     project_name: '',
     problem_statement: '',
     stakeholders: [] as string[],
@@ -109,9 +132,38 @@ export default function ARBSubmission() {
     nfr_criteria: [] as Array<{ category: string; criteria: string; target_value: string; actual_value: string; score: number; evidence?: string }>,
   })
 
-  const handleNext = () => {
+  const handleNext = async () => {
     const totalSteps = domains.length + 1
     if (currentStep < totalSteps) {
+      // Save draft before moving to next step
+      try {
+        // Extract scope tags from form data and artefacts
+        const scopeTags = reviewService.extractScopeTags(formData, artefacts)
+        
+        if (!formData.reviewId) {
+          // Create new review
+          const draftData = {
+            solution_name: formData.solution_name || formData.project_name || '',
+            scope_tags: scopeTags,
+            sa_user_id: user?.id || '',
+            form_data: formData
+          }
+          const response = await reviewService.createDraft(draftData)
+          setFormData({ ...formData, reviewId: response.id, scope_tags: scopeTags })
+        } else {
+          // Update existing review
+          const updateData = {
+            form_data: formData,
+            scope_tags: scopeTags
+          }
+          await reviewService.updateDraft(formData.reviewId, updateData)
+          setFormData({ ...formData, scope_tags: scopeTags })
+        }
+      } catch (error) {
+        console.error('Failed to save draft:', error)
+        alert('Failed to save draft. Please try again.')
+        return
+      }
       setCurrentStep(currentStep + 1)
     }
   }
@@ -124,7 +176,7 @@ export default function ARBSubmission() {
 
   const handleSaveDraft = async () => {
     try {
-      const scopeTags = reviewService.extractScopeTags(formData)
+      const scopeTags = reviewService.extractScopeTags(formData, artefacts)
       
       const draftData = {
         solution_name: formData.project_name || 'Untitled Review',
@@ -148,21 +200,14 @@ export default function ARBSubmission() {
 
   const handleSubmit = async () => {
     try {
-      // Extract scope tags from form data
-      const scopeTags = reviewService.extractScopeTags(formData)
+      // Extract scope tags from form data and artefacts
+      const scopeTags = reviewService.extractScopeTags(formData, artefacts)
 
       // Flatten all artifacts into a single array
       const allArtifacts = Object.values(artefacts).flat()
 
       if (allArtifacts.length === 0) {
         alert('Please upload at least one artifact before submitting')
-        return
-      }
-
-      // Use the first artifact as the main artifact for review
-      const mainArtifact = allArtifacts[0]
-      if (!mainArtifact.file) {
-        alert('Main artifact file is missing')
         return
       }
 
@@ -201,26 +246,24 @@ export default function ARBSubmission() {
         return
       }
 
-      // 2. Upload main artifact to Supabase Storage
-      const artifactInfo = await reviewService.uploadArtifact(reviewId, mainArtifact.file)
-
-      // 3. Update review with artifact path
-      await reviewService.updateReviewArtifactInfo(reviewId, {
-        artifact_path: artifactInfo.fullPath,
-        artifact_filename: artifactInfo.fileName,
-        artifact_file_type: artifactInfo.fileType,
-        artifact_file_size_bytes: artifactInfo.fileSize
-      })
-
-      // 4. Upload additional artifacts if any
-      for (let i = 1; i < allArtifacts.length; i++) {
-        const artifact = allArtifacts[i]
-        if (artifact.file) {
-          await reviewService.uploadArtifact(reviewId, artifact.file)
+      // 2. Upload all new artifacts using the Python backend
+      // Only upload artifacts that have a file (newly selected, not already uploaded)
+      const artifactsToUpload = allArtifacts.filter(a => a.file) as Array<{ name: string; type: string; file: File }>
+      
+      // Upload artifacts per domain
+      for (const [domain, domainArtifacts] of Object.entries(artefacts)) {
+        const newArtifactsInDomain = domainArtifacts.filter(a => a.file)
+        if (newArtifactsInDomain.length > 0) {
+          await reviewService.uploadArtefacts(reviewId, newArtifactsInDomain.map(a => ({
+            domain: domain,
+            name: a.name,
+            type: a.type,
+            file: a.file!
+          })))
         }
       }
 
-      // 5. Validate completeness
+      // 3. Validate completeness
       const validation = await reviewService.validateCompleteness(reviewId)
 
       if (!validation.isComplete) {
@@ -234,16 +277,9 @@ export default function ARBSubmission() {
         return
       }
 
-      // 6. If validation passes, ask user if they want to mark as ready for review
-      if (confirm('Submission is complete. Would you like to mark it as ready for review and trigger the AI review process?')) {
-        // Mark as ready for review and trigger backend
-        await reviewService.markReadyForReview(reviewId)
-        navigate(`/review-status/${reviewId}`)
-      } else {
-        // Save as submitted but don't trigger backend
-        alert('Submission saved as submitted. You can mark it as ready for review later from the dashboard.')
-        navigate('/dashboard')
-      }
+      // 4. Save as submitted - review process will be triggered later from dashboard
+      alert('Submission saved as submitted. You can mark it as ready for review from the dashboard to trigger the AI review process.')
+      navigate('/dashboard')
     } catch (error) {
       console.error('Error submitting:', error)
       alert(`Failed to submit: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -308,7 +344,7 @@ export default function ARBSubmission() {
             <div>
               <label className="block text-sm font-medium mb-2">Stakeholders</label>
               <Textarea
-                value={formData.stakeholders.join('\n')}
+                value={formData.stakeholders?.join('\n') || ''}
                 onChange={(e) => setFormData({ ...formData, stakeholders: e.target.value.split('\n').filter(s => s.trim()) })}
                 placeholder="List key stakeholders (one per line)"
                 rows={4}
@@ -317,9 +353,9 @@ export default function ARBSubmission() {
             <div>
               <label className="block text-sm font-medium mb-2">Business Drivers</label>
               <Textarea
-                value={formData.business_drivers.join('\n')}
+                value={formData.business_drivers?.join('\n') || ''}
                 onChange={(e) => setFormData({ ...formData, business_drivers: e.target.value.split('\n').filter(s => s.trim()) })}
-                placeholder="List business drivers (one per line)"
+                placeholder="List key business drivers (one per line)"
                 rows={4}
               />
             </div>
@@ -418,13 +454,70 @@ export default function ARBSubmission() {
                   </div>
                 </div>
                 <Button
-                  onClick={() => {
-                    if (newArtefact.name && newArtefact.type && newArtefact.fileName) {
-                      setArtefacts({
-                        ...artefacts,
-                        [domainSlug]: [...artefacts[domainSlug], newArtefact],
-                      })
-                      setNewArtefact({ domain: '', name: '', type: '', fileName: '', file: null })
+                  onClick={async () => {
+                    if (newArtefact.name && newArtefact.type && newArtefact.file) {
+                      const reviewId = formData.reviewId
+                      if (!reviewId) {
+                        alert('Please save the draft first by clicking Next before uploading artefacts')
+                        return
+                      }
+
+                      try {
+                        // Check if artefact with same name already exists in this domain
+                        const existingArtefactIndex = artefacts[domainSlug]?.findIndex(
+                          a => a.name === newArtefact.name
+                        )
+
+                        // If exists, delete it first
+                        if (existingArtefactIndex !== undefined && existingArtefactIndex >= 0) {
+                          const existingArtefact = artefacts[domainSlug][existingArtefactIndex]
+                          if (existingArtefact.id) {
+                            await artefactService.deleteArtefact(existingArtefact.id)
+                          }
+                        }
+
+                        const artefactData = {
+                          domain: domainSlug,
+                          name: newArtefact.name,
+                          type: newArtefact.type,
+                          file: newArtefact.file
+                        }
+
+                        const uploadedArtefacts = await reviewService.uploadArtefacts(reviewId, [artefactData])
+                        const uploadedArtefact = uploadedArtefacts[0]
+
+                        // If we overwrote an existing artefact, replace it in the list
+                        if (existingArtefactIndex !== undefined && existingArtefactIndex >= 0) {
+                          const updatedArtefacts = [...artefacts[domainSlug]]
+                          updatedArtefacts[existingArtefactIndex] = {
+                            id: uploadedArtefact.id,
+                            name: uploadedArtefact.artefact_name,
+                            type: uploadedArtefact.artefact_type,
+                            fileName: uploadedArtefact.filename,
+                            file: null
+                          }
+                          setArtefacts({
+                            ...artefacts,
+                            [domainSlug]: updatedArtefacts
+                          })
+                        } else {
+                          // Add as new artefact
+                          setArtefacts({
+                            ...artefacts,
+                            [domainSlug]: [...(artefacts[domainSlug] || []), {
+                              id: uploadedArtefact.id,
+                              name: uploadedArtefact.artefact_name,
+                              type: uploadedArtefact.artefact_type,
+                              fileName: uploadedArtefact.filename,
+                              file: null
+                            }],
+                          })
+                        }
+                        setNewArtefact({ domain: '', name: '', type: '', fileName: '', file: null })
+                      } catch (error) {
+                        console.error('Failed to upload artefact:', error)
+                        alert('Failed to upload artefact. Please try again.')
+                      }
                     }
                   }}
                   className="mt-3"
@@ -447,7 +540,28 @@ export default function ARBSubmission() {
                           <p className="text-xs text-muted-foreground">{artefact.fileName}</p>
                         </div>
                       </div>
-                      <span className="text-xs px-2 py-1 rounded-full bg-gray-100">{getArtefactTypeLabel(artefact.type)}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs px-2 py-1 rounded-full bg-gray-100">{getArtefactTypeLabel(artefact.type)}</span>
+                        {artefact.id && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await artefactService.deleteArtefact(artefact.id!)
+                                setArtefacts({
+                                  ...artefacts,
+                                  [domainSlug]: artefacts[domainSlug].filter((_, i) => i !== index)
+                                })
+                              } catch (error) {
+                                console.error('Failed to delete artefact:', error)
+                                alert('Failed to delete artefact. Please try again.')
+                              }
+                            }}
+                            className="text-xs text-red-600 hover:text-red-800 px-2 py-1"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

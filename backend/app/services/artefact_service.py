@@ -10,6 +10,7 @@ import re
 from app.db.artefact_models import Artefact, ArtefactChunk, KnowledgeBase
 from app.core.database import get_db
 from app.services.llm_service import llm_service
+from app.core.config import settings
 import os
 
 class ArtefactService:
@@ -227,17 +228,34 @@ class ArtefactService:
         
         return [
             {
-                "id": artefact.id,
+                "id": str(artefact.id),
+                "review_id": str(artefact.review_id),
                 "domain_slug": artefact.domain_slug,
                 "artefact_name": artefact.artefact_name,
                 "artefact_type": artefact.artefact_type,
                 "filename": artefact.filename,
                 "file_type": artefact.file_type,
                 "file_size_bytes": artefact.file_size_bytes,
-                "uploaded_at": artefact.uploaded_at
+                "uploaded_at": artefact.uploaded_at.isoformat() if artefact.uploaded_at else None,
+                "is_active": artefact.is_active
             }
             for artefact in artefacts
         ]
+
+    async def delete_artefact(self, artefact_id: str) -> bool:
+        """Delete an artefact and its chunks"""
+        # Delete associated chunks first
+        self.db.query(ArtefactChunk).filter(
+            ArtefactChunk.artefact_id == artefact_id
+        ).delete()
+        
+        # Delete the artefact
+        result = self.db.query(Artefact).filter(
+            Artefact.id == artefact_id
+        ).delete()
+        
+        self.db.commit()
+        return result > 0
     
     async def _generate_embeddings(self, artefact_id: str):
         """Generate embeddings for chunks using configured LLM provider"""

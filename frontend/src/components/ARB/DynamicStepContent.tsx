@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useMetadataStore } from '../../stores/metadataStore'
 import { useLocation } from 'react-router-dom'
+import { reviewService } from '../../services/python/reviewService'
 
 interface DynamicStepContentProps {
   currentStep: number
@@ -11,6 +12,7 @@ interface DynamicStepContentProps {
 export default function DynamicStepContent({ currentStep, formData, setFormData }: DynamicStepContentProps) {
   const { domains, loadDomainMetadata, artefactTemplatesByDomain, checklistSubsectionsByDomain } = useMetadataStore()
   const location = useLocation()
+  const [uploading, setUploading] = useState(false)
   
   const ptxGate = location.state?.ptxGate || ''
   const architectureDisposition = location.state?.architectureDisposition || ''
@@ -34,7 +36,7 @@ export default function DynamicStepContent({ currentStep, formData, setFormData 
       case 1:
         return <SolutionContextStep formData={formData} setFormData={setFormData} ptxGate={ptxGate} architectureDisposition={architectureDisposition} />
       case 9:
-        return <NFRStep formData={formData} setFormData={setFormData} artefactTemplates={artefactTemplatesByDomain['nfr'] || []} checklistSubsections={checklistSubsectionsByDomain['nfr'] || []} />
+        return <NFRStep formData={formData} setFormData={setFormData} artefactTemplates={artefactTemplatesByDomain['nfr'] || []} checklistSubsections={checklistSubsectionsByDomain['nfr'] || []} uploading={uploading} setUploading={setUploading} />
       default:
         const domain = domains[currentStep - 2]
         if (!domain) return null
@@ -45,6 +47,8 @@ export default function DynamicStepContent({ currentStep, formData, setFormData 
             setFormData={setFormData}
             artefactTemplates={artefactTemplatesByDomain[domain.slug] || []}
             checklistSubsections={checklistSubsectionsByDomain[domain.slug] || []}
+            uploading={uploading}
+            setUploading={setUploading}
           />
         )
     }
@@ -130,7 +134,7 @@ function SolutionContextStep({ formData, setFormData, ptxGate, architectureDispo
 }
 
 // NFR Step Component
-function NFRStep({ formData, setFormData, artefactTemplates, checklistSubsections }: any) {
+function NFRStep({ formData, setFormData, artefactTemplates, checklistSubsections, uploading, setUploading }: any) {
   return (
     <div className="space-y-6">
       <ArtefactUploadSection 
@@ -138,6 +142,8 @@ function NFRStep({ formData, setFormData, artefactTemplates, checklistSubsection
         artefactTemplates={artefactTemplates}
         formData={formData}
         setFormData={setFormData}
+        uploading={uploading}
+        setUploading={setUploading}
       />
       <ComplianceChecklistSection 
         domain="nfr"
@@ -150,7 +156,7 @@ function NFRStep({ formData, setFormData, artefactTemplates, checklistSubsection
 }
 
 // Domain Step Component
-function DomainStep({ domain, formData, setFormData, artefactTemplates, checklistSubsections }: any) {
+function DomainStep({ domain, formData, setFormData, artefactTemplates, checklistSubsections, uploading, setUploading }: any) {
   return (
     <div className="space-y-6">
       <ArtefactUploadSection 
@@ -158,6 +164,8 @@ function DomainStep({ domain, formData, setFormData, artefactTemplates, checklis
         artefactTemplates={artefactTemplates}
         formData={formData}
         setFormData={setFormData}
+        uploading={uploading}
+        setUploading={setUploading}
       />
       <ComplianceChecklistSection 
         domain={domain.slug}
@@ -170,7 +178,7 @@ function DomainStep({ domain, formData, setFormData, artefactTemplates, checklis
 }
 
 // Artefact Upload Section Component
-function ArtefactUploadSection({ domain, artefactTemplates, formData, setFormData }: any) {
+function ArtefactUploadSection({ domain, artefactTemplates, formData, setFormData, uploading, setUploading }: any) {
   return (
     <div>
       <label className="block text-sm font-medium mb-4">Artefacts</label>
@@ -253,22 +261,49 @@ function ArtefactUploadSection({ domain, artefactTemplates, formData, setFormDat
           </div>
         </div>
         <button
-          onClick={() => {
-            if (formData.newArtefact?.name && formData.newArtefact?.type && formData.newArtefact?.fileName) {
-              const currentArtefacts = formData.artefacts?.[domain] || []
-              setFormData({
-                ...formData,
-                artefacts: {
-                  ...formData.artefacts,
-                  [domain]: [...currentArtefacts, formData.newArtefact]
-                },
-                newArtefact: { domain: '', name: '', type: '', fileName: '', file: null }
-              })
+          onClick={async () => {
+            if (formData.newArtefact?.name && formData.newArtefact?.type && formData.newArtefact?.file) {
+              setUploading(true)
+              try {
+                // Upload artefact to backend
+                const reviewId = formData.reviewId
+                if (!reviewId) {
+                  alert('Please save the draft first before uploading artefacts')
+                  setUploading(false)
+                  return
+                }
+
+                const artefactData = {
+                  domain: domain,
+                  name: formData.newArtefact.name,
+                  type: formData.newArtefact.type,
+                  file: formData.newArtefact.file
+                }
+
+                await reviewService.uploadArtefacts(reviewId, [artefactData])
+
+                // Add to local state after successful upload
+                const currentArtefacts = formData.artefacts?.[domain] || []
+                setFormData({
+                  ...formData,
+                  artefacts: {
+                    ...formData.artefacts,
+                    [domain]: [...currentArtefacts, formData.newArtefact]
+                  },
+                  newArtefact: { domain: '', name: '', type: '', fileName: '', file: null }
+                })
+              } catch (error) {
+                console.error('Failed to upload artefact:', error)
+                alert('Failed to upload artefact. Please try again.')
+              } finally {
+                setUploading(false)
+              }
             }
           }}
-          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+          disabled={uploading}
+          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:bg-gray-400"
         >
-          Add Artefact
+          {uploading ? 'Uploading...' : 'Add Artefact'}
         </button>
       </div>
 
@@ -372,7 +407,8 @@ function QuestionDialog({ subsection, domain, formData, setFormData, onClose }: 
         </div>
         <div className="space-y-6">
           {subsection.questions?.map((question: any) => {
-            const currentIndex = options.indexOf(formData[`${domain}_checklist`]?.[question.question_code] as string) || 0
+            const currentAnswer = formData.domain_data?.[domain]?.checklist?.[question.question_code]
+            const currentIndex = Math.max(0, options.indexOf(currentAnswer))
 
             return (
               <div key={question.id} className="border rounded-lg p-4">
@@ -385,11 +421,18 @@ function QuestionDialog({ subsection, domain, formData, setFormData, onClose }: 
                     step="1"
                     value={currentIndex}
                     onChange={(e) => {
+                      const answer = options[parseInt(e.target.value)]
                       setFormData({
                         ...formData,
-                        [`${domain}_checklist`]: {
-                          ...formData[`${domain}_checklist`],
-                          [question.question_code]: options[parseInt(e.target.value)],
+                        domain_data: {
+                          ...formData.domain_data,
+                          [domain]: {
+                            ...formData.domain_data?.[domain],
+                            checklist: {
+                              ...formData.domain_data?.[domain]?.checklist,
+                              [question.question_code]: answer,
+                            },
+                          },
                         },
                       })
                     }}
@@ -406,13 +449,19 @@ function QuestionDialog({ subsection, domain, formData, setFormData, onClose }: 
                 <input
                   type="text"
                   placeholder="Evidence notes"
-                  value={formData[`${domain}_evidence`]?.[question.question_code] || ''}
+                  value={formData.domain_data?.[domain]?.evidence?.[question.question_code] || ''}
                   onChange={(e) => {
                     setFormData({
                       ...formData,
-                      [`${domain}_evidence`]: {
-                        ...formData[`${domain}_evidence`],
-                        [question.question_code]: e.target.value,
+                      domain_data: {
+                        ...formData.domain_data,
+                        [domain]: {
+                          ...formData.domain_data?.[domain],
+                          evidence: {
+                            ...formData.domain_data?.[domain]?.evidence,
+                            [question.question_code]: e.target.value,
+                          },
+                        },
                       },
                     })
                   }}

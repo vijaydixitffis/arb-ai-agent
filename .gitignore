@@ -81,6 +81,9 @@ htmlcov/
 .tox/
 .mypy_cache/
 *.cover
+testing/
+test_*.py
+*_test.py
 
 # Frontend build
 frontend/dist/

@@ -1,13 +1,38 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+import time
+import logging
 from app.api.routes import api_router
 from app.core.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+        logger.info(f"[REQUEST] {request.method} {request.url.path} - Started")
+        
+        response = await call_next(request)
+        
+        duration = time.time() - start_time
+        logger.info(f"[REQUEST] {request.method} {request.url.path} - Completed in {duration:.3f}s - Status {response.status_code}")
+        
+        return response
 
 app = FastAPI(
     title="ARB AI Agent API",
     description="Architecture Review Board AI Agent Backend",
     version="1.0.0"
 )
+
+# Add request logging middleware first
+app.add_middleware(RequestLoggingMiddleware)
 
 # CORS configuration
 app.add_middleware(

@@ -365,6 +365,26 @@ export default function ReviewStatus() {
               </Card>
             )}
 
+            {/* View Review Button - Only show when status is reviewed */}
+            {reviewStatus.status === 'reviewed' && (
+              <Card>
+                <CardContent>
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                      <span className="font-medium">Review Complete</span>
+                    </div>
+                    <Button 
+                      onClick={() => window.open(`/review/${reviewId}/view`, '_blank')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      View Full Review
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Polling Indicator */}
             {polling && (
               <div className="flex items-center justify-center gap-2 text-sm text-gray-500">

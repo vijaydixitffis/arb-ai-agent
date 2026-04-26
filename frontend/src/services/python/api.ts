@@ -6,6 +6,9 @@ export async function apiRequest(
 ) {
   const url = `${API_BASE_URL}${endpoint}`
   const token = localStorage.getItem('token')
+  
+  console.log('[API-REQUEST] URL:', url)
+  console.log('[API-REQUEST] Method:', options.method || 'GET')
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -16,31 +19,53 @@ export async function apiRequest(
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  })
+  try {
+    console.log('[API-REQUEST] Sending request...')
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    })
+    
+    console.log('[API-REQUEST] Response status:', response.status)
 
-  if (!response.ok) {
-    throw new Error(`API request failed: ${response.statusText}`)
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('[API-REQUEST] Error response:', errorText)
+      throw new Error(`API request failed: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  } catch (error) {
+    console.error('[API-REQUEST] Fetch error:', error)
+    throw error
   }
-
-  return response.json()
 }
 
 export const api = {
   // Auth
-  login: (email: string, password: string) => {
+  login: async (email: string, password: string) => {
+    console.log('[API] Attempting login for:', email)
     const params = new URLSearchParams()
     params.append('username', email)
     params.append('password', password)
-    return apiRequest('/auth/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: params,
-    })
+    
+    const url = `${API_BASE_URL}/auth/login`
+    console.log('[API] Login URL:', url)
+    
+    try {
+      const result = await apiRequest('/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params,
+      })
+      console.log('[API] Login successful')
+      return result
+    } catch (error) {
+      console.error('[API] Login failed:', error)
+      throw error
+    }
   },
 
   getDemoUsers: () =>

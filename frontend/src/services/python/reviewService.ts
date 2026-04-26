@@ -85,13 +85,18 @@ export const reviewService = {
    * Mark review as ready for review and trigger backend
    */
   async markReadyForReview(reviewId: string): Promise<ReviewResult> {
+    console.log('[FRONTEND] Marking review as ready for review:', reviewId)
+    
     // Update status to submitted
+    console.log('[FRONTEND] Updating review status to submitted')
     await apiRequest(`/reviews/${reviewId}`, {
       method: 'PUT',
       body: JSON.stringify({ status: 'submitted' })
     })
+    console.log('[FRONTEND] Review status updated successfully')
 
     // Trigger review orchestrator
+    console.log('[FRONTEND] About to trigger review orchestrator')
     const result = await this.triggerReviewOrchestrator(reviewId)
     
     return result
@@ -166,10 +171,18 @@ export const reviewService = {
    * Trigger the review orchestrator via Python backend
    */
   async triggerReviewOrchestrator(reviewId: string): Promise<ReviewResult> {
-    return await apiRequest('/agent/review', {
-      method: 'POST',
-      body: JSON.stringify({ reviewId })
-    })
+    console.log('[FRONTEND] Triggering review orchestrator for reviewId:', reviewId)
+    try {
+      const result = await apiRequest('/agent/review', {
+        method: 'POST',
+        body: JSON.stringify({ reviewId })
+      })
+      console.log('[FRONTEND] Review orchestrator triggered successfully:', result)
+      return result
+    } catch (error) {
+      console.error('[FRONTEND] Failed to trigger review orchestrator:', error)
+      throw error
+    }
   },
 
   /**
@@ -265,29 +278,57 @@ export const reviewService = {
     const review = await this.getReviewById(reviewId)
     return {
       review,
-      formData: review.report_json?.form_data || {}
+      formData: review.report_json || {}
     }
   },
 
   /**
-   * Extract scope tags from form data
-   * Maps frontend domain sections to scope tags
-   * Uses dynamic domain_data structure
+   * Extract scope tags from form data and artefacts
+   * Maps frontend domain sections and artefact domains to scope tags
+   * Uses dynamic domain_data structure and artefact domains
    */
-  extractScopeTags(formData: any): string[] {
-    const tags: string[] = []
+  extractScopeTags(formData: any, artefacts?: Record<string, any[]>): string[] {
+    const tags: Set<string> = new Set()
 
-    // Check for dynamic domain_data structure
+    // Check for dynamic domain_data structure - add domains with checklist data (new format)
     if (formData.domain_data) {
       Object.keys(formData.domain_data).forEach(domain => {
-        if (formData.domain_data[domain].checklist && 
-            Object.keys(formData.domain_data[domain].checklist).length > 0) {
-          tags.push(domain)
+        const hasChecklist = formData.domain_data[domain]?.checklist && 
+            Object.keys(formData.domain_data[domain].checklist).length > 0
+        const hasEvidence = formData.domain_data[domain]?.evidence && 
+            Object.keys(formData.domain_data[domain].evidence).length > 0
+        if (hasChecklist || hasEvidence) {
+          tags.add(domain)
         }
       })
     }
 
-    return tags
+    // Check for old format checklist data at root level (backward compatibility)
+    Object.keys(formData).forEach(key => {
+      if (key.endsWith('_checklist') || key.endsWith('_evidence')) {
+        const domain = key.replace(/_(checklist|evidence)$/, '')
+        const data = formData[key]
+        if (data && Object.keys(data).length > 0) {
+          tags.add(domain)
+        }
+      }
+    })
+
+    // Add domains from artefacts - if artefacts exist for a domain, include it
+    if (artefacts) {
+      Object.entries(artefacts).forEach(([domain, domainArtefacts]) => {
+        if (domainArtefacts && domainArtefacts.length > 0) {
+          tags.add(domain)
+        }
+      })
+    }
+
+    // If no tags found, default to 'general' to ensure AI review runs
+    if (tags.size === 0) {
+      tags.add('general')
+    }
+
+    return Array.from(tags)
   },
 
   /**

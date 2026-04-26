@@ -1,9 +1,13 @@
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
+import logging
+import time
 from app.services.llm_service import llm_service
 from app.services.artefact_service import ArtefactService
 from app.db.review_models import Review
 import json
+
+logger = logging.getLogger(__name__)
 
 class EnhancedDomainValidationAgent:
     """Enhanced domain agent using PostgreSQL artefact chunks and knowledge base"""
@@ -34,16 +38,25 @@ class EnhancedDomainValidationAgent:
     ) -> Dict[str, Any]:
         """Validate a specific domain using artefact chunks and knowledge base"""
         
-        print(f"Validating domain: {domain_slug} for review: {review_id}")
+        start_time = time.time()
+        logger.info(f"[DOMAIN-AGENT] Starting validation for domain: {domain_slug}, review: {review_id}")
         
         # Get relevant artefact chunks for this domain
+        logger.debug(f"[DOMAIN-AGENT] Fetching artefact chunks for domain: {domain_slug}")
+        chunks_start = time.time()
         artefact_chunks = await self.artefact_service.get_relevant_chunks(
             review_id=review_id,
             domain_slug=domain_slug,
             limit=20
         )
+        chunks_duration = time.time() - chunks_start
+        logger.info(f"[DOMAIN-AGENT] Retrieved {len(artefact_chunks)} artefact chunks in {chunks_duration:.2f}s")
+        for i, chunk in enumerate(artefact_chunks[:5]):  # Log first 5 chunks
+            logger.debug(f"[DOMAIN-AGENT] Chunk {i+1}: {chunk.get('filename')} (length: {len(chunk.get('chunk_text', ''))} chars)")
         
         # Get relevant knowledge base content
+        logger.debug(f"[DOMAIN-AGENT] Searching knowledge base for domain: {domain_slug}")
+        kb_start = time.time()
         kb_results = await self.artefact_service.search_knowledge_base(
             query=f"{domain_slug} architecture principles standards",
             category=domain_slug,
@@ -57,41 +70,70 @@ class EnhancedDomainValidationAgent:
             limit=5
         )
         kb_results.extend(general_kb)
+        kb_duration = time.time() - kb_start
+        logger.info(f"[DOMAIN-AGENT] Retrieved {len(kb_results)} knowledge base articles in {kb_duration:.2f}s")
+        for kb in kb_results[:3]:  # Log first 3 KB articles
+            logger.debug(f"[DOMAIN-AGENT] KB Article: {kb.get('title')} (Principle: {kb.get('principle_id', 'N/A')})")
         
         # Build domain-specific prompt
+        logger.debug(f"[DOMAIN-AGENT] Building domain prompt")
         prompt = await self._build_domain_prompt(
             domain_slug=domain_slug,
             artefact_chunks=artefact_chunks,
             knowledge_base=kb_results,
             checklist_data=checklist_data
         )
+        logger.debug(f"[DOMAIN-AGENT] Prompt length: {len(prompt)} chars")
+        
+        # Log prompt to file for testing
+        import os
+        prompt_file = f"/tmp/llm_prompt_{domain_slug}_{review_id[:8]}.txt"
+        with open(prompt_file, 'w') as f:
+            f.write(f"SYSTEM PROMPT:\n{self.domain_prompts.get(domain_slug, self.domain_prompts['general'])}\n\n")
+            f.write(f"USER PROMPT:\n{prompt}")
+        logger.info(f"[DOMAIN-AGENT] Prompt saved to: {prompt_file}")
         
         # Call LLM
+        logger.info(f"[DOMAIN-AGENT] Calling LLM for domain: {domain_slug}")
+        llm_start = time.time()
         response = await self.llm_service.generate_completion(
             prompt=prompt,
             system_prompt=self.domain_prompts.get(domain_slug, self.domain_prompts["general"]),
             temperature=0.1,
             max_tokens=4000
         )
+        llm_duration = time.time() - llm_start
+        logger.info(f"[DOMAIN-AGENT] LLM call completed in {llm_duration:.2f}s, Tokens used: {response.get('tokens_used', 'N/A')}")
+        logger.debug(f"[DOMAIN-AGENT] LLM response length: {len(response.get('content', ''))} chars")
+        
+        # Clean markdown code blocks if present
+        content = response["content"]
+        if content.strip().startswith("```"):
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
         
         # Parse response
         try:
-            result = json.loads(response["content"])
-        except json.JSONDecodeError:
-            # Fallback if JSON parsing fails
-            result = {
-                "domain": domain_slug,
-                "overall_compliance": "PARTIALLY_COMPLIANT",
-                "compliance_score": 70,
-                "gaps": [{"description": "Unable to parse LLM response properly", "severity": "Medium"}],
-                "recommendations": ["Manual review required"],
-                "error": "JSON parsing failed"
-            }
+            result = json.loads(content)
+            logger.info(f"[DOMAIN-AGENT] Successfully parsed LLM response for domain: {domain_slug}")
+        except json.JSONDecodeError as e:
+            logger.error(f"[DOMAIN-AGENT] Failed to parse LLM response as JSON: {e}")
+            logger.debug(f"[DOMAIN-AGENT] Raw response: {content[:500]}...")
+            raise
         
         # Add metadata
         result["tokens_used"] = response["tokens_used"]
         result["artefact_chunks_used"] = len(artefact_chunks)
         result["kb_articles_used"] = len(kb_results)
+        
+        total_duration = time.time() - start_time
+        logger.info(f"[DOMAIN-AGENT] Domain validation completed - Domain: {domain_slug}, Compliance: {result.get('overall_compliance')}, Score: {result.get('compliance_score')}, Gaps: {len(result.get('gaps', []))}, Total Duration: {total_duration:.2f}s")
         
         return result
     
@@ -200,45 +242,92 @@ Focus on providing specific, evidence-based findings with clear references to th
     ) -> Dict[str, Any]:
         """Synthesize all domain results into final ARB recommendation"""
         
+        start_time = time.time()
+        logger.info(f"[DOMAIN-AGENT] Starting synthesis of {len(domain_results)} domain results for review: {review_id}")
+        
         # Get overall review context
+        logger.debug(f"[DOMAIN-AGENT] Fetching review context for synthesis")
         review = self.db.query(Review).filter(Review.id == review_id).first()
         if not review:
+            logger.error(f"[DOMAIN-AGENT] Review {review_id} not found for synthesis")
             raise ValueError(f"Review {review_id} not found")
         
+        logger.info(f"[DOMAIN-AGENT] Review context - Solution: {review.solution_name}, Scope: {review.scope_tags}")
+        
         # Get all artefact chunks for context
+        logger.debug(f"[DOMAIN-AGENT] Fetching artefact chunks for synthesis context")
+        chunks_start = time.time()
         all_chunks = await self.artefact_service.get_relevant_chunks(
             review_id=review_id,
             limit=50
         )
+        chunks_duration = time.time() - chunks_start
+        logger.info(f"[DOMAIN-AGENT] Retrieved {len(all_chunks)} artefact chunks for synthesis in {chunks_duration:.2f}s")
         
         # Build synthesis prompt
+        logger.debug(f"[DOMAIN-AGENT] Building synthesis prompt")
         prompt = self._build_synthesis_prompt(
             review=review,
             domain_results=domain_results,
             artefact_chunks=all_chunks
         )
+        logger.debug(f"[DOMAIN-AGENT] Synthesis prompt length: {len(prompt)} chars")
+        
+        # Log synthesis prompt to file for testing
+        synthesis_prompt_file = f"/tmp/llm_prompt_synthesis_{review_id[:8]}.txt"
+        with open(synthesis_prompt_file, 'w') as f:
+            f.write(f"SYSTEM PROMPT:\nYou are the Chief Architecture Review Board member responsible for synthesizing domain evaluations into a final ARB decision.\n\n")
+            f.write(f"USER PROMPT:\n{prompt}")
+        logger.info(f"[DOMAIN-AGENT] Synthesis prompt saved to: {synthesis_prompt_file}")
         
         # Call LLM for synthesis
+        logger.info(f"[DOMAIN-AGENT] Calling LLM for synthesis")
+        llm_start = time.time()
         response = await self.llm_service.generate_completion(
             prompt=prompt,
             system_prompt="You are the Chief Architecture Review Board member responsible for synthesizing domain evaluations into a final ARB decision.",
             temperature=0.1,
             max_tokens=4000
         )
+        llm_duration = time.time() - llm_start
+        content = response.get("content", "")
+        logger.info(f"[DOMAIN-AGENT] LLM synthesis call completed in {llm_duration:.2f}s, Tokens used: {response.get('tokens_used', 'N/A')}, Content length: {len(content) if content else 0}")
+        
+        # Log raw response for debugging
+        if content:
+            logger.info(f"[DOMAIN-AGENT] Raw response preview: {content[:200]}...")
+        else:
+            logger.error(f"[DOMAIN-AGENT] LLM response content is EMPTY! Full response: {response}")
+        
+        # Clean markdown code blocks if present
+        if content.strip().startswith("```"):
+            # Remove opening ```json or ```
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            # Remove closing ```
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            logger.info(f"[DOMAIN-AGENT] Stripped markdown code blocks, new content length: {len(content)}")
         
         # Parse response
         try:
-            result = json.loads(response["content"])
-        except json.JSONDecodeError:
-            result = {
-                "decision": "defer",
-                "rationale": "Unable to synthesize results properly",
-                "error": "JSON parsing failed"
-            }
+            result = json.loads(content)
+            logger.info(f"[DOMAIN-AGENT] Successfully parsed synthesis response - Decision: {result.get('decision')}")
+        except json.JSONDecodeError as e:
+            logger.error(f"[DOMAIN-AGENT] Failed to parse synthesis response as JSON: {e}")
+            logger.error(f"[DOMAIN-AGENT] Raw response content: {content[:1000] if content else 'EMPTY'}")
+            raise
         
         # Add metadata
         result["tokens_used"] = response["tokens_used"]
         result["domains_evaluated"] = len(domain_results)
+        
+        total_duration = time.time() - start_time
+        logger.info(f"[DOMAIN-AGENT] Synthesis completed - Decision: {result.get('decision')}, Aggregate Score: {result.get('aggregate_score')}, Total Duration: {total_duration:.2f}s")
         
         return result
     

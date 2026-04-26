@@ -90,6 +90,24 @@ async def get_review_chunks(
     
     return chunks
 
+@router.delete("/artefacts/{artefact_id}")
+async def delete_artefact(
+    artefact_id: str,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete an artefact"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    service = ArtefactService(db)
+    success = await service.delete_artefact(uuid.UUID(artefact_id))
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Artefact not found")
+    
+    return {"message": "Artefact deleted successfully"}
+
 # ============================================================================
 # KNOWLEDGE BASE ENDPOINTS
 # ============================================================================

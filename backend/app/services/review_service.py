@@ -61,7 +61,10 @@ class ReviewService:
                 return None
             
             for key, value in review_data.items():
-                if hasattr(review, key) and value is not None:
+                if key == 'form_data' and value is not None:
+                    # Store form data in report_json
+                    review.report_json = value
+                elif hasattr(review, key) and value is not None:
                     setattr(review, key, value)
             
             review.updated_at = datetime.utcnow()
