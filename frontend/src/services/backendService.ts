@@ -1,5 +1,5 @@
 import { reviewService } from './python/reviewService'
-import { supabaseService } from './supabase'
+import { supabaseService } from './supabase.ts'
 import { apiRequest } from './python/api'
 
 // Get backend type from environment
