@@ -1,6 +1,5 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Dict, Any
-from app.services.knowledge_base import knowledge_base_service
 from app.agents.domain_agents import DomainValidationAgent
 from app.agents.nfr_agent import NFRAssessmentAgent
 from app.agents.decision_agent import DecisionAgent
@@ -63,13 +62,6 @@ class ARBOrchestrator:
         validation_results = {}
         
         for domain in domains:
-            # Query knowledge base for domain standards
-            standards = knowledge_base_service.query_standards(
-                domain, 
-                f"{domain} architecture compliance requirements",
-                n_results=3
-            )
-            
             # Run domain validation agent
             domain_section = state["domain_sections"].get(domain, {})
             result = await self.domain_agent.validate_domain(

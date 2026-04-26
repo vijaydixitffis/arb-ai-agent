@@ -13,8 +13,8 @@ from app.core.config import settings
 from openai import AsyncOpenAI
 
 # Gemini imports
-import google.generativeai as genai
-import google.ai.generativelanguage as glm
+from google import genai
+from google.genai import types as genai_types
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +27,8 @@ class LLMService:
         if self.provider == "openai":
             self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         elif self.provider == "gemini":
-            # Force REST transport to fix IPv6 hanging issues
-            # See: https://github.com/google-gemini/generative-ai-python/issues
-            genai.configure(
-                api_key=settings.GEMINI_API_KEY,
-                transport="rest"  # Force REST instead of default (prevents IPv6 stalls)
-            )
-            self.gemini_model = genai.GenerativeModel(settings.GEMINI_MODEL)
+            # New SDK uses httpx (REST) by default — no IPv6 stall issues
+            self.gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
     
@@ -120,50 +115,38 @@ class LLMService:
         
         logger.debug(f"[LLM-GEMINI] Full prompt length: {len(full_prompt)} chars")
         
-        # Configure generation parameters
-        generation_config = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-        }
-        
-        def _call_gemini_sync():
-            """Synchronous Gemini API call - run in thread pool"""
-            try:
-                logger.info("[LLM-GEMINI] Calling Gemini API (in thread pool)...")
-                response = self.gemini_model.generate_content(
-                    full_prompt,
-                    generation_config=generation_config
-                )
-                
-                # Check if response has content
-                if not hasattr(response, 'text') or response.text is None:
-                    logger.error(f"[LLM-GEMINI] Response has no text attribute or text is None!")
-                    logger.error(f"[LLM-GEMINI] Response object: {response}")
-                    raise ValueError("Gemini response has no content")
-                
-                logger.info(f"[LLM-GEMINI] Gemini response received, length: {len(response.text)} chars")
-                
-                tokens_used = 0
-                if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                    tokens_used = response.usage_metadata.total_token_count
-                    logger.info(f"[LLM-GEMINI] Token usage: {tokens_used}")
-                
-                return {
-                    "content": response.text,
-                    "tokens_used": tokens_used,
-                    "model": settings.GEMINI_MODEL,
-                    "provider": "gemini"
-                }
-            except Exception as e:
-                logger.error(f"[LLM-GEMINI] Gemini API error: {str(e)}")
-                raise
-        
+        config = genai_types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+
         try:
-            # Run the blocking call in a thread pool to avoid blocking the event loop
-            result = await asyncio.to_thread(_call_gemini_sync)
-            return result
+            logger.info("[LLM-GEMINI] Calling Gemini API (async)...")
+            response = await self.gemini_client.aio.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=full_prompt,
+                config=config,
+            )
+
+            if not response.text:
+                logger.error(f"[LLM-GEMINI] Response has no text: {response}")
+                raise ValueError("Gemini response has no content")
+
+            logger.info(f"[LLM-GEMINI] Response received, length: {len(response.text)} chars")
+
+            tokens_used = 0
+            if response.usage_metadata:
+                tokens_used = response.usage_metadata.total_token_count
+                logger.info(f"[LLM-GEMINI] Token usage: {tokens_used}")
+
+            return {
+                "content": response.text,
+                "tokens_used": tokens_used,
+                "model": settings.GEMINI_MODEL,
+                "provider": "gemini",
+            }
         except Exception as e:
-            logger.error(f"[LLM-GEMINI] Thread pool error: {str(e)}")
+            logger.error(f"[LLM-GEMINI] Gemini API error: {str(e)}")
             raise
     
     async def generate_embedding(self, text: str) -> list:
@@ -186,15 +169,12 @@ class LLMService:
     
     async def _gemini_embedding(self, text: str) -> list:
         """Generate embedding using Gemini"""
-        
-        # Use Gemini's embedding model
-        embedding_model = genai.GenerativeModel(settings.GEMINI_EMBEDDING_MODEL)
-        
-        # Note: Gemini embedding API might differ - this is a placeholder
-        # You may need to adjust based on actual Gemini embedding API
-        response = embedding_model.embed_content(text)
-        
-        return response.embedding
+
+        response = await self.gemini_client.aio.models.embed_content(
+            model=settings.GEMINI_EMBEDDING_MODEL,
+            contents=text,
+        )
+        return response.embeddings[0].values
 
 # Global LLM service instance
 llm_service = LLMService()

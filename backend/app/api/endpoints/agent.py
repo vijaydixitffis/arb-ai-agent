@@ -151,18 +151,6 @@ async def trigger_review(
         logger.error(f"[AGENT-ENDPOINT] Review orchestration failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Review orchestration failed: {str(e)}")
 
-@router.post("/populate-knowledge-base")
-async def populate_knowledge_base(current_user: str = Depends(get_current_user)):
-    """Populate the knowledge base with sample EA standards"""
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    try:
-        from app.services.knowledge_base import knowledge_base_service
-        knowledge_base_service.populate_sample_knowledge()
-        return {"message": "Knowledge base populated successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error populating knowledge base: {str(e)}")
-
 @router.get("/test-llm")
 async def test_llm(current_user: str = Depends(get_current_user)):
     """Test LLM connectivity with a simple prompt"""

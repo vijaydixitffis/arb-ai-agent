@@ -25,9 +25,6 @@ class Settings(BaseSettings):
     # PostgreSQL Configuration
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/arb_ai_agent"
     
-    # Vector Store Configuration
-    CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
-    
     # JWT Configuration
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"

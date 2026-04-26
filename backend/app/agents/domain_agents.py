@@ -2,7 +2,6 @@ from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from app.core.config import settings
-from app.services.knowledge_base import knowledge_base_service
 
 class DomainValidationAgent:
     def __init__(self):
@@ -82,25 +81,7 @@ class DomainValidationAgent:
         elif "infrastructure" in domain.lower():
             query += " infrastructure scalability reliability cloud"
         
-        # Query knowledge base for each category and combine results
         all_principles = []
-        for category in categories:
-            principles = knowledge_base_service.query_principles(
-                collection_name=collection_name,
-                query=query,
-                n_results=5,  # Get top 5 per category
-                category=category
-            )
-            all_principles.extend(principles)
-        
-        # Also include General principles for all domains
-        general_principles = knowledge_base_service.query_principles(
-            collection_name=collection_name,
-            query=f"General architecture principles",
-            n_results=5,
-            category="General"
-        )
-        all_principles.extend(general_principles)
         
         # Deduplicate by principle_id
         seen_ids = set()
@@ -134,13 +115,8 @@ class DomainValidationAgent:
         elif "infrastructure" in domain.lower():
             query += " infrastructure scalability reliability cloud"
         
-        # Query knowledge base for standards
-        standards = knowledge_base_service.query_standards(
-            domain=standard_domain,
-            query=query,
-            n_results=5  # Get top 5 standards
-        )
-        
+        standards = []
+
         # Deduplicate by standard_id
         seen_ids = set()
         unique_standards = []

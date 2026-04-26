@@ -70,6 +70,14 @@ class EnhancedDomainValidationAgent:
             limit=5
         )
         kb_results.extend(general_kb)
+
+        # Include EA patterns reference material relevant to this domain
+        ea_patterns_kb = await self.artefact_service.search_knowledge_base(
+            query=f"{domain_slug} architecture patterns",
+            category="ea-patterns",
+            limit=5
+        )
+        kb_results.extend(ea_patterns_kb)
         kb_duration = time.time() - kb_start
         logger.info(f"[DOMAIN-AGENT] Retrieved {len(kb_results)} knowledge base articles in {kb_duration:.2f}s")
         for kb in kb_results[:3]:  # Log first 3 KB articles
