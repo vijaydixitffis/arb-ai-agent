@@ -1,425 +1,443 @@
-from typing import Dict, Any, List, Optional
-from sqlalchemy.orm import Session
+"""
+Enhanced Domain Validation Agent — aligned with the Pre-ARB AI Agent spec.
+
+Prompt structure mirrors the TypeScript edge-function orchestrator:
+  SYSTEM  → role + 10 RULES + SCORING RULES
+  USER    → REVIEW SESSION / KB CONTEXT / SA ARTIFACTS / CHECKLIST /
+            ID SEED / MANDATORY CATEGORIES / OUTPUT SCHEMA
+
+Output: DomainReviewPayload  (summary, blockers, recommendations, findings, actions, adrs)
+"""
+
+from __future__ import annotations
+
 import logging
 import time
-from app.services.llm_service import llm_service
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.services.llm_service import llm_service, LLMService
 from app.services.artefact_service import ArtefactService
 from app.db.review_models import Review
-import json
 
 logger = logging.getLogger(__name__)
 
+# ── Domain metadata ────────────────────────────────────────────────────────────
+
+DOMAIN_CODE: Dict[str, str] = {
+    "general":        "GEN",
+    "business":       "BUS",
+    "application":    "APP",
+    "integration":    "INT",
+    "data":           "DAT",
+    "security":       "SEC",
+    "infrastructure": "INF",
+    "devsecops":      "DSO",
+    "nfr":            "NFR",
+}
+
+DOMAIN_LABEL: Dict[str, str] = {
+    "general":        "General Architecture",
+    "business":       "Business Domain",
+    "application":    "Application Domain",
+    "integration":    "Integration Domain",
+    "data":           "Data Domain",
+    "security":       "Security Domain",
+    "infrastructure": "Infrastructure & Platform",
+    "devsecops":      "DevSecOps Domain",
+    "nfr":            "Non-Functional Requirements",
+}
+
+# Maps Python domain slug → question_registry.frontend_tab values
+# (frontend_tab uses full slug names matching the Python DB)
+DOMAIN_TO_QR_TABS: Dict[str, List[str]] = {
+    "general":        ["general"],
+    "business":       ["business"],
+    "application":    ["application"],
+    "integration":    ["integration"],
+    "data":           ["data"],
+    "security":       ["infrastructure", "nfr"],  # infra-sec-* + nfr-sec-*
+    "infrastructure": ["infrastructure"],
+    "devsecops":      ["devsecops"],
+    "nfr":            ["nfr"],
+}
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _rag_score_to_severity(rag_score: int) -> str:
+    """Map LLM rag_score (1-5) to DB findings.severity constraint values."""
+    if rag_score <= 1:
+        return "critical"
+    if rag_score <= 2:
+        return "major"
+    return "minor"
+
+
+# ── Domain Agent ──────────────────────────────────────────────────────────────
+
 class EnhancedDomainValidationAgent:
-    """Enhanced domain agent using PostgreSQL artefact chunks and knowledge base"""
-    
+    """Per-domain LLM agent producing a spec-compliant DomainReviewPayload."""
+
     def __init__(self, db: Session):
         self.db = db
-        self.llm_service = llm_service
+        self.llm_service: LLMService = llm_service
         self.artefact_service = ArtefactService(db)
-        
-        # Domain-specific system prompts
-        self.domain_prompts = {
-            "general": "You are an expert Enterprise Architecture validator for General/Enterprise Architecture. Focus on overall architecture governance, stakeholder alignment, and architectural decision records.",
-            "business": "You are a Business Architecture expert. Validate business capabilities, value streams, stakeholder requirements, and business process alignment.",
-            "application": "You are an Application Architecture expert. Focus on application portfolio, API design, microservices, integration patterns, and technology standards.",
-            "integration": "You are an Integration Architecture expert. Validate API gateways, message brokers, data exchange patterns, and system interoperability.",
-            "data": "You are a Data Architecture expert. Focus on data models, lineage, governance, master data, and data quality standards.",
-            "security": "You are a Security Architecture expert. Validate authentication, authorization, encryption, security controls, and compliance requirements.",
-            "infrastructure": "You are an Infrastructure Architecture expert. Focus on cloud infrastructure, scalability, reliability, monitoring, and operations.",
-            "devsecops": "You are a DevSecOps expert. Validate CI/CD pipelines, security automation, DevOps practices, and operational readiness.",
-            "nfr": "You are a Non-Functional Requirements expert. Validate performance, scalability, availability, disaster recovery, and service level agreements."
-        }
-    
+
+    # ── Main entry point ──────────────────────────────────────────────────────
+
     async def validate_domain(
         self,
         review_id: str,
         domain_slug: str,
-        checklist_data: Dict[str, Any]
+        checklist_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Validate a specific domain using artefact chunks and knowledge base"""
-        
-        start_time = time.time()
-        logger.info(f"[DOMAIN-AGENT] Starting validation for domain: {domain_slug}, review: {review_id}")
-        
-        # Get relevant artefact chunks for this domain
-        logger.debug(f"[DOMAIN-AGENT] Fetching artefact chunks for domain: {domain_slug}")
-        chunks_start = time.time()
-        artefact_chunks = await self.artefact_service.get_relevant_chunks(
-            review_id=review_id,
-            domain_slug=domain_slug,
-            limit=20
+        """Validate a single domain and return a DomainReviewPayload dict."""
+        t0 = time.time()
+        logger.info(f"[DOMAIN-AGENT] validate_domain domain={domain_slug} review={review_id}")
+
+        domain_code  = DOMAIN_CODE.get(domain_slug, domain_slug.upper()[:3])
+        domain_label = DOMAIN_LABEL.get(domain_slug, domain_slug.title())
+
+        # 1. Artefact chunks
+        chunks = await self.artefact_service.get_relevant_chunks(
+            review_id=review_id, domain_slug=domain_slug, limit=15
         )
-        chunks_duration = time.time() - chunks_start
-        logger.info(f"[DOMAIN-AGENT] Retrieved {len(artefact_chunks)} artefact chunks in {chunks_duration:.2f}s")
-        for i, chunk in enumerate(artefact_chunks[:5]):  # Log first 5 chunks
-            logger.debug(f"[DOMAIN-AGENT] Chunk {i+1}: {chunk.get('filename')} (length: {len(chunk.get('chunk_text', ''))} chars)")
-        
-        # Get relevant knowledge base content
-        logger.debug(f"[DOMAIN-AGENT] Searching knowledge base for domain: {domain_slug}")
-        kb_start = time.time()
-        kb_results = await self.artefact_service.search_knowledge_base(
+        logger.info(f"[DOMAIN-AGENT] {domain_slug}: {len(chunks)} artefact chunks")
+
+        # 2. Knowledge-base context (domain + general)
+        kb_domain  = await self.artefact_service.search_knowledge_base(
             query=f"{domain_slug} architecture principles standards",
-            category=domain_slug,
-            limit=10
+            category=domain_slug, limit=8,
         )
-        
-        # Also get general principles
-        general_kb = await self.artefact_service.search_knowledge_base(
-            query="general enterprise architecture principles",
-            category="general",
-            limit=5
+        kb_general = await self.artefact_service.search_knowledge_base(
+            query="enterprise architecture principles", category="general", limit=4,
         )
-        kb_results.extend(general_kb)
+        kb_results = kb_domain + kb_general
+        logger.info(f"[DOMAIN-AGENT] {domain_slug}: {len(kb_results)} KB articles")
 
-        # Include EA patterns reference material relevant to this domain
-        ea_patterns_kb = await self.artefact_service.search_knowledge_base(
-            query=f"{domain_slug} architecture patterns",
-            category="ea-patterns",
-            limit=5
-        )
-        kb_results.extend(ea_patterns_kb)
-        kb_duration = time.time() - kb_start
-        logger.info(f"[DOMAIN-AGENT] Retrieved {len(kb_results)} knowledge base articles in {kb_duration:.2f}s")
-        for kb in kb_results[:3]:  # Log first 3 KB articles
-            logger.debug(f"[DOMAIN-AGENT] KB Article: {kb.get('title')} (Principle: {kb.get('principle_id', 'N/A')})")
-        
-        # Build domain-specific prompt
-        logger.debug(f"[DOMAIN-AGENT] Building domain prompt")
-        prompt = await self._build_domain_prompt(
+        # 3. Check categories from question_registry
+        check_categories = self._get_check_categories(domain_slug)
+
+        # 4. NFR quantitative criteria (only for nfr domain)
+        nfr_context = ""
+        if domain_slug == "nfr":
+            review = self.db.query(Review).filter(Review.id == review_id).first()
+            nfr_context = self._build_nfr_criteria_block(review)
+
+        # 5. Build prompts (spec structure)
+        system_prompt = self._build_system_prompt(domain_label)
+        user_prompt   = self._build_user_prompt(
+            session_id=review_id,
             domain_slug=domain_slug,
-            artefact_chunks=artefact_chunks,
-            knowledge_base=kb_results,
-            checklist_data=checklist_data
+            domain_code=domain_code,
+            checklist_data=checklist_data,
+            chunks=chunks,
+            kb_results=kb_results,
+            check_categories=check_categories,
+            nfr_context=nfr_context,
         )
-        logger.debug(f"[DOMAIN-AGENT] Prompt length: {len(prompt)} chars")
-        
-        # Log prompt to file for testing
-        import os
-        prompt_file = f"/tmp/llm_prompt_{domain_slug}_{review_id[:8]}.txt"
-        with open(prompt_file, 'w') as f:
-            f.write(f"SYSTEM PROMPT:\n{self.domain_prompts.get(domain_slug, self.domain_prompts['general'])}\n\n")
-            f.write(f"USER PROMPT:\n{prompt}")
-        logger.info(f"[DOMAIN-AGENT] Prompt saved to: {prompt_file}")
-        
-        # Call LLM
-        logger.info(f"[DOMAIN-AGENT] Calling LLM for domain: {domain_slug}")
-        llm_start = time.time()
+
+        # 6. Call LLM
+        logger.info(f"[DOMAIN-AGENT] calling LLM for {domain_slug}")
         response = await self.llm_service.generate_completion(
-            prompt=prompt,
-            system_prompt=self.domain_prompts.get(domain_slug, self.domain_prompts["general"]),
-            temperature=0.1,
-            max_tokens=4000
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            temperature=0.3,
+            max_tokens=8192,
         )
-        llm_duration = time.time() - llm_start
-        logger.info(f"[DOMAIN-AGENT] LLM call completed in {llm_duration:.2f}s, Tokens used: {response.get('tokens_used', 'N/A')}")
-        logger.debug(f"[DOMAIN-AGENT] LLM response length: {len(response.get('content', ''))} chars")
-        
-        # Clean markdown code blocks if present
-        content = response["content"]
-        if content.strip().startswith("```"):
-            content = content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            elif content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-        
-        # Parse response
+
+        # 7. Parse DomainReviewPayload
         try:
-            result = json.loads(content)
-            logger.info(f"[DOMAIN-AGENT] Successfully parsed LLM response for domain: {domain_slug}")
-        except json.JSONDecodeError as e:
-            logger.error(f"[DOMAIN-AGENT] Failed to parse LLM response as JSON: {e}")
-            logger.debug(f"[DOMAIN-AGENT] Raw response: {content[:500]}...")
-            raise
-        
-        # Add metadata
-        result["tokens_used"] = response["tokens_used"]
-        result["artefact_chunks_used"] = len(artefact_chunks)
-        result["kb_articles_used"] = len(kb_results)
-        
-        total_duration = time.time() - start_time
-        logger.info(f"[DOMAIN-AGENT] Domain validation completed - Domain: {domain_slug}, Compliance: {result.get('overall_compliance')}, Score: {result.get('compliance_score')}, Gaps: {len(result.get('gaps', []))}, Total Duration: {total_duration:.2f}s")
-        
-        return result
-    
-    async def _build_domain_prompt(
+            payload = LLMService.parse_json_from_llm(response["content"])
+        except Exception as exc:
+            logger.error(f"[DOMAIN-AGENT] JSON parse failed for {domain_slug}: {exc}")
+            logger.debug(f"[DOMAIN-AGENT] raw={response['content'][:400]}")
+            payload = {
+                "domain": domain_slug,
+                "session_id": review_id,
+                "summary": {"rag_score": 3, "rag_label": "AMBER",
+                            "rationale": "Parse error — manual review required",
+                            "total_findings": 0, "blocker_count": 0, "mandatory_gaps": 0},
+                "blockers": [], "recommendations": [],
+                "findings": [], "actions": [], "adrs": [],
+            }
+
+        payload["tokens_used"]          = response.get("tokens_used", 0)
+        payload["artefact_chunks_used"] = len(chunks)
+        payload["kb_articles_used"]     = len(kb_results)
+
+        logger.info(
+            f"[DOMAIN-AGENT] {domain_slug} done in {time.time()-t0:.2f}s "
+            f"rag_score={payload.get('summary', {}).get('rag_score')} "
+            f"findings={len(payload.get('findings', []))} "
+            f"blockers={len(payload.get('blockers', []))}"
+        )
+        return payload
+
+    # ── System prompt (spec §RULES + SCORING RULES) ───────────────────────────
+
+    def _build_system_prompt(self, domain_label: str) -> str:
+        return f"""You are the {domain_label} specialist agent in the Pre-ARB AI Agent pipeline.
+Your role is to validate the Solution Architect's submitted artifacts against
+enterprise architecture standards and produce a structured JSON review payload.
+
+RULES:
+1. Respond ONLY with a valid JSON object matching DomainReviewPayload schema.
+   No preamble, no markdown, no explanation outside the JSON.
+2. Every finding must reference a specific SA artifact AND a specific KB document.
+   Never generate findings from general knowledge alone.
+3. Every Blocker must have rag_score = 1 and appear in both findings[] and blockers[].
+4. Every finding with rag_score <= 3 (AMBER or RED) must have at least one Action in actions[].
+5. Every significant architectural decision or deviation must have an ADR in adrs[].
+6. ADRs of type WAIVER must include a proposed waiver_expiry_date (ISO date string).
+7. summary.rag_score must equal min(all finding rag_scores). You cannot score AMBER if any finding is RED.
+8. If evidence is absent for a mandatory check, set rag_score = 1 (RED). Never skip mandatory categories.
+9. Do not invent evidence. If it is not present in the provided artifacts, flag its absence explicitly.
+10. Security domain rule: any finding with rag_score < 4 must generate a Blocker record.
+
+SCORING RULES:
+5 = Fully compliant — all evidence present, no gaps
+4 = Compliant with minor tracked actions only
+3 = Partially compliant — gaps exist but mitigation plan is documented
+2 = Significant gaps — mandatory remediation actions required before go-live
+1 = Fails mandatory standard OR evidence is absent (RED / BLOCKER)"""
+
+    # ── User prompt (all spec sections) ──────────────────────────────────────
+
+    def _build_user_prompt(
         self,
-        domain_slug: str,
-        artefact_chunks: List[Dict[str, Any]],
-        knowledge_base: List[Dict[str, Any]],
-        checklist_data: Dict[str, Any]
+        session_id:       str,
+        domain_slug:      str,
+        domain_code:      str,
+        checklist_data:   Dict[str, Any],
+        chunks:           List[Dict[str, Any]],
+        kb_results:       List[Dict[str, Any]],
+        check_categories: List[Dict[str, Any]],
+        nfr_context:      str,
     ) -> str:
-        """Build comprehensive prompt for domain validation"""
-        
-        # Format artefact chunks
-        artefacts_text = ""
-        for i, chunk in enumerate(artefact_chunks[:15], 1):  # Limit to top 15 chunks
-            artefacts_text += f"\n--- Artefact Chunk {i} ({chunk.get('filename', 'Unknown')}) ---\n"
-            artefacts_text += chunk["chunk_text"] + "\n"
-        
-        # Format knowledge base
-        kb_text = ""
-        for i, kb in enumerate(knowledge_base[:10], 1):  # Limit to top 10 KB articles
-            kb_text += f"\n--- Knowledge Base {i}: {kb['title']} ---\n"
-            if kb.get('principle_id'):
-                kb_text += f"Principle ID: {kb['principle_id']}\n"
-            kb_text += kb["content"] + "\n"
-        
-        # Format checklist
-        checklist_text = ""
-        checklist_items = checklist_data.get("checklist_items", [])
-        for item in checklist_items:
-            question = item.get('question_text', item.get('question', 'N/A'))
-            answer = item.get('answer', 'N/A')
-            evidence = item.get('evidence_notes', item.get('evidence', 'None'))
-            checklist_text += f"- Q: {question}\n  A: {answer}\n  Evidence: {evidence}\n\n"
-        
-        # Get domain metadata
-        domain_metadata = checklist_data.get("domain_metadata", {})
-        domain_name = domain_metadata.get("name", domain_slug.title())
-        domain_description = domain_metadata.get("description", "")
-        
-        prompt = f"""You are conducting an Enterprise Architecture Review Board (ARB) validation for the {domain_name} domain.
+        from datetime import datetime, timezone
 
-Domain Description: {domain_description}
+        review_date    = datetime.now(timezone.utc).isoformat()
+        domain_label   = DOMAIN_LABEL.get(domain_slug, domain_slug.title())
+        solution_name  = checklist_data.get("domain_metadata", {}).get("solution_name", "(not provided)")
 
-=== RELEVANT ARTEFACT CONTENT ===
-{artefacts_text if artefacts_text else "No artefact content available for this domain."}
+        # --- KB section ---
+        kb_lines: List[str] = []
+        for i, kb in enumerate(kb_results[:10], 1):
+            kb_lines.append(f"\n[KB-{i:02d} | {kb.get('principle_id', 'N/A')}]\n{kb['title']}\n{kb['content']}")
+        kb_block = "\n".join(kb_lines) if kb_lines else "(No KB entries loaded for this domain.)"
 
-=== RELEVANT KNOWLEDGE BASE ===
-{kb_text if kb_text else "No relevant knowledge base articles found."}
+        # --- SA Artifacts section ---
+        artifact_lines: List[str] = []
+        for i, chunk in enumerate(chunks[:15], 1):
+            artifact_lines.append(
+                f"\n--- Artefact {i}: {chunk.get('filename', 'Unknown')} ---\n{chunk['chunk_text']}"
+            )
+        artifact_block = "\n".join(artifact_lines) if artifact_lines else "(No artefact content available.)"
+        if nfr_context:
+            artifact_block += f"\n\n{nfr_context}"
 
-=== COMPLIANCE CHECKLIST ===
-{checklist_text if checklist_text else "No checklist items provided."}
+        # --- Checklist section ---
+        checklist_lines: List[str] = []
+        items = checklist_data.get("checklist_items", [])
+        for item in items:
+            q    = item.get("question_text", item.get("question", "N/A"))
+            code = item.get("question_code", "")
+            ans  = item.get("answer", "not_answered")
+            ev   = item.get("evidence", "") or "(none provided)"
+            checklist_lines.append(
+                f"  {code:<15}  {q}\n"
+                f"             Answer:   {ans.upper()}\n"
+                f"             Evidence: {ev}"
+            )
+        checklist_block = "\n".join(checklist_lines) if checklist_lines else "(No checklist items provided.)"
 
-=== VALIDATION TASK ===
-Based on the artefact content, knowledge base principles/standards, and checklist responses:
-
-1. Analyze the submitted artefacts for {domain_name} domain compliance
-2. Reference specific principle IDs from the knowledge base in your findings
-3. Identify gaps between submitted artefacts and required standards
-4. Evaluate the quality and completeness of checklist evidence
-5. Provide specific, actionable recommendations
-
-=== RESPONSE FORMAT ===
-Provide your analysis in this exact JSON format:
-{{
-    "domain": "{domain_slug}",
-    "domain_name": "{domain_name}",
-    "overall_compliance": "COMPLIANT|PARTIALLY_COMPLIANT|NON_COMPLIANT",
-    "compliance_score": 0-100,
-    "checklist_compliance": {{
-        "total_items": number,
-        "compliant_items": number,
-        "non_compliant_items": number,
-        "partial_items": number
-    }},
-    "gaps": [
-        {{
-            "type": "principle|standard|checklist|evidence",
-            "reference_id": "PRINCIPLE-XX or STANDARD-XX or checklist_item_id",
-            "description": "Clear description of the gap",
-            "severity": "Critical|High|Medium|Low",
-            "artefact_reference": "filename or section where gap was found"
-        }}
-    ],
-    "recommendations": [
-        {{
-            "action": "Specific action to take",
-            "priority": "Critical|High|Medium|Low",
-            "owner": "Role responsible for action"
-        }}
-    ],
-    "violated_principles": ["PRINCIPLE-XX", "PRINCIPLE-YY"],
-    "evidence_gaps": ["Missing evidence for checklist item X"],
-    "strengths": ["What was done well in this domain"],
-    "next_steps": ["Immediate next steps for the team"]
-}}
-
-Focus on providing specific, evidence-based findings with clear references to the artefact content and knowledge base principles."""
-        
-        return prompt
-    
-    async def synthesize_domain_results(
-        self,
-        review_id: str,
-        domain_results: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Synthesize all domain results into final ARB recommendation"""
-        
-        start_time = time.time()
-        logger.info(f"[DOMAIN-AGENT] Starting synthesis of {len(domain_results)} domain results for review: {review_id}")
-        
-        # Get overall review context
-        logger.debug(f"[DOMAIN-AGENT] Fetching review context for synthesis")
-        review = self.db.query(Review).filter(Review.id == review_id).first()
-        if not review:
-            logger.error(f"[DOMAIN-AGENT] Review {review_id} not found for synthesis")
-            raise ValueError(f"Review {review_id} not found")
-        
-        logger.info(f"[DOMAIN-AGENT] Review context - Solution: {review.solution_name}, Scope: {review.scope_tags}")
-        
-        # Get all artefact chunks for context
-        logger.debug(f"[DOMAIN-AGENT] Fetching artefact chunks for synthesis context")
-        chunks_start = time.time()
-        all_chunks = await self.artefact_service.get_relevant_chunks(
-            review_id=review_id,
-            limit=50
-        )
-        chunks_duration = time.time() - chunks_start
-        logger.info(f"[DOMAIN-AGENT] Retrieved {len(all_chunks)} artefact chunks for synthesis in {chunks_duration:.2f}s")
-        
-        # Build synthesis prompt
-        logger.debug(f"[DOMAIN-AGENT] Building synthesis prompt")
-        prompt = self._build_synthesis_prompt(
-            review=review,
-            domain_results=domain_results,
-            artefact_chunks=all_chunks
-        )
-        logger.debug(f"[DOMAIN-AGENT] Synthesis prompt length: {len(prompt)} chars")
-        
-        # Log synthesis prompt to file for testing
-        synthesis_prompt_file = f"/tmp/llm_prompt_synthesis_{review_id[:8]}.txt"
-        with open(synthesis_prompt_file, 'w') as f:
-            f.write(f"SYSTEM PROMPT:\nYou are the Chief Architecture Review Board member responsible for synthesizing domain evaluations into a final ARB decision.\n\n")
-            f.write(f"USER PROMPT:\n{prompt}")
-        logger.info(f"[DOMAIN-AGENT] Synthesis prompt saved to: {synthesis_prompt_file}")
-        
-        # Call LLM for synthesis
-        logger.info(f"[DOMAIN-AGENT] Calling LLM for synthesis")
-        llm_start = time.time()
-        response = await self.llm_service.generate_completion(
-            prompt=prompt,
-            system_prompt="You are the Chief Architecture Review Board member responsible for synthesizing domain evaluations into a final ARB decision.",
-            temperature=0.1,
-            max_tokens=4000
-        )
-        llm_duration = time.time() - llm_start
-        content = response.get("content", "")
-        logger.info(f"[DOMAIN-AGENT] LLM synthesis call completed in {llm_duration:.2f}s, Tokens used: {response.get('tokens_used', 'N/A')}, Content length: {len(content) if content else 0}")
-        
-        # Log raw response for debugging
-        if content:
-            logger.info(f"[DOMAIN-AGENT] Raw response preview: {content[:200]}...")
+        # --- Mandatory check categories ---
+        if check_categories:
+            cat_lines = []
+            for c in check_categories:
+                flag = "  [MANDATORY-GREEN] " if c["is_mandatory_green"] else "  "
+                suffix = "  ← non_compliant or not_answered = BLOCKER" if c["is_mandatory_green"] else ""
+                cat_lines.append(f"{flag}{c['category']}{suffix}")
+            categories_block = "\n".join(cat_lines)
         else:
-            logger.error(f"[DOMAIN-AGENT] LLM response content is EMPTY! Full response: {response}")
-        
-        # Clean markdown code blocks if present
-        if content.strip().startswith("```"):
-            # Remove opening ```json or ```
-            content = content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            elif content.startswith("```"):
-                content = content[3:]
-            # Remove closing ```
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-            logger.info(f"[DOMAIN-AGENT] Stripped markdown code blocks, new content length: {len(content)}")
-        
-        # Parse response
-        try:
-            result = json.loads(content)
-            logger.info(f"[DOMAIN-AGENT] Successfully parsed synthesis response - Decision: {result.get('decision')}")
-        except json.JSONDecodeError as e:
-            logger.error(f"[DOMAIN-AGENT] Failed to parse synthesis response as JSON: {e}")
-            logger.error(f"[DOMAIN-AGENT] Raw response content: {content[:1000] if content else 'EMPTY'}")
-            raise
-        
-        # Add metadata
-        result["tokens_used"] = response["tokens_used"]
-        result["domains_evaluated"] = len(domain_results)
-        
-        total_duration = time.time() - start_time
-        logger.info(f"[DOMAIN-AGENT] Synthesis completed - Decision: {result.get('decision')}, Aggregate Score: {result.get('aggregate_score')}, Total Duration: {total_duration:.2f}s")
-        
-        return result
-    
-    def _build_synthesis_prompt(
-        self,
-        review: Review,
-        domain_results: List[Dict[str, Any]],
-        artefact_chunks: List[Dict[str, Any]]
-    ) -> str:
-        """Build prompt for synthesizing domain results"""
-        
-        # Format domain results
-        domains_text = ""
-        for result in domain_results:
-            domains_text += f"\n=== {result.get('domain_name', result['domain']).upper()} DOMAIN ===\n"
-            domains_text += f"Compliance: {result.get('overall_compliance', 'Unknown')}\n"
-            domains_text += f"Score: {result.get('compliance_score', 0)}/100\n"
-            
-            gaps = result.get('gaps', [])
-            if gaps:
-                domains_text += f"Key Gaps ({len(gaps)}):\n"
-                for gap in gaps[:3]:  # Top 3 gaps per domain
-                    domains_text += f"  - {gap.get('description', 'N/A')} [{gap.get('severity', 'Unknown')}]\n"
-            
-            recommendations = result.get('recommendations', [])
-            if recommendations:
-                domains_text += f"Key Recommendations:\n"
-                for rec in recommendations[:2]:  # Top 2 recommendations per domain
-                    domains_text += f"  - {rec.get('action', rec) if isinstance(rec, dict) else rec}\n"
-        
-        # Calculate aggregate metrics
-        total_score = sum(r.get('compliance_score', 0) for r in domain_results)
-        avg_score = total_score / len(domain_results) if domain_results else 0
-        
-        critical_gaps = sum(1 for r in domain_results for g in r.get('gaps', []) if g.get('severity') == 'Critical')
-        high_gaps = sum(1 for r in domain_results for g in r.get('gaps', []) if g.get('severity') == 'High')
-        
-        prompt = f"""You are the Chief Architecture Review Board member conducting the final review for:
+            categories_block = "  (no categories registered — use check_category from checklist above)"
 
-Solution Name: {review.solution_name}
-Scope: {', '.join(review.scope_tags) if review.scope_tags else 'Not specified'}
+        return f"""== REVIEW SESSION ==
+session_id: {session_id}
+solution_name: {solution_name}
+domain_under_review: {domain_code}
+review_date: {review_date}
 
-=== DOMAIN EVALUATION SUMMARY ===
-{domains_text}
+== SOLUTION CONTEXT ==
+Domain: {domain_label}
+Domain Description: {checklist_data.get("domain_metadata", {}).get("description", "")}
 
-=== AGGREGATE METRICS ===
-Average Compliance Score: {avg_score:.1f}/100
-Total Critical Issues: {critical_gaps}
-Total High Priority Issues: {high_gaps}
-Domains Evaluated: {len(domain_results)}
+== KNOWLEDGE BASE CONTEXT (retrieved for this domain) ==
+{kb_block}
 
-=== FINAL REVIEW TASK ===
-Based on all domain evaluations:
+== SA SUBMITTED ARTIFACTS ==
+{artifact_block}
 
-1. Make a final ARB decision: APPROVE, APPROVE_WITH_CONDITIONS, DEFER, or REJECT
-2. Consider critical blockers (security, compliance, major architectural gaps)
-3. Evaluate overall solution readiness
-4. Provide clear rationale for your decision
-5. Define specific conditions if approval is conditional
-6. Set timeline for remediation if deferred/rejected
+== SA CHECKLIST ANSWERS & EVIDENCE ==
+{checklist_block}
 
-=== RESPONSE FORMAT ===
+== ID SEED ==
+finding_id_start:        {domain_code}-F01
+blocker_id_start:        {domain_code}-BLK-01
+recommendation_id_start: {domain_code}-REC-01
+action_id_start:         {domain_code}-ACT-01
+adr_id_start:            ADR-{domain_code}-01
+Use these as starting IDs, incrementing sequentially (F01, F02, F03 ...).
+
+== MANDATORY CHECK CATEGORIES FOR THIS DOMAIN ==
+Produce at least one Finding for each category below.
+Categories marked [MANDATORY-GREEN] require rag_score = 1 if the SA answer is non_compliant or not_answered.
+
+{categories_block}
+
+== OUTPUT SCHEMA ==
+Return a JSON object with this exact top-level structure. No markdown. No prose outside the JSON.
+
 {{
-    "decision": "APPROVE|APPROVE_WITH_CONDITIONS|DEFER|REJECT",
-    "aggregate_score": {int(avg_score)},
-    "rationale": "Detailed explanation of the decision",
-    "critical_blockers": ["List of critical issues preventing approval"],
-    "conditions": [
-        {{
-            "condition": "Specific condition to meet",
-            "timeline": "Timeline for meeting condition",
-            "owner": "Role responsible"
-        }}
-    ],
-    "next_review_date": "YYYY-MM-DD for deferred cases",
-    "strengths": ["Overall solution strengths"],
-    "major_concerns": ["Cross-domain concerns"],
-    "recommendations": ["Strategic recommendations for the team"]
-}}
+  "domain": "{domain_code}",
+  "session_id": "{session_id}",
+  "summary": {{
+    "rag_score": 3,
+    "rag_label": "GREEN | AMBER | RED",
+    "rationale": "One-sentence justification for the domain rag_score",
+    "total_findings": 0,
+    "blocker_count": 0,
+    "mandatory_gaps": 0
+  }},
+  "blockers": [
+    {{
+      "id": "{domain_code}-BLK-01",
+      "finding_ref": "{domain_code}-F01",
+      "description": "Precise description of the blocking issue",
+      "resolution_required": "Specific action that must be completed before approval"
+    }}
+  ],
+  "recommendations": [
+    {{
+      "id": "{domain_code}-REC-01",
+      "finding_ref": "{domain_code}-F01",
+      "recommendation": "Specific improvement recommendation",
+      "priority": "HIGH | MEDIUM | LOW"
+    }}
+  ],
+  "findings": [
+    {{
+      "id": "{domain_code}-F01",
+      "check_category": "CATEGORY_FROM_LIST_ABOVE",
+      "rag_score": 1,
+      "rag_label": "GREEN | AMBER | RED",
+      "finding": "Clear description referencing the specific SA artifact gap and relevant KB document",
+      "artifact_ref": "File name or section in SA submission where evidence was sought",
+      "kb_ref": "KB document ID or title that defines the standard",
+      "principle_id": "EA principle code if applicable, else null"
+    }}
+  ],
+  "actions": [
+    {{
+      "id": "{domain_code}-ACT-01",
+      "finding_ref": "{domain_code}-F01",
+      "action": "Specific, measurable remediation step",
+      "owner_role": "solution_architect | enterprise_architect | dev_team | security_team",
+      "due_days": 30,
+      "priority": "HIGH | MEDIUM | LOW"
+    }}
+  ],
+  "adrs": [
+    {{
+      "id": "ADR-{domain_code}-01",
+      "type": "DECISION | WAIVER",
+      "decision": "Decision title",
+      "rationale": "Why this decision is being made",
+      "context": "Background context (optional)",
+      "owner": "Role or team responsible",
+      "target_date": "YYYY-MM-DD or null",
+      "waiver_expiry_date": "YYYY-MM-DD — required when type = WAIVER, else null"
+    }}
+  ]
+}}"""
 
-Decision Guidelines:
-- APPROVE: No critical issues, score >= 80, all domains compliant
-- APPROVE_WITH_CONDITIONS: Minor issues, score >= 70, fixable conditions
-- DEFER: Significant issues requiring more work, score >= 50
-- REJECT: Critical blockers, score < 50, fundamental architectural problems"""
+    # ── Check categories from question_registry ───────────────────────────────
 
-        return prompt
+    def _get_check_categories(self, domain_slug: str) -> List[Dict[str, Any]]:
+        """Return unique check_category rows for the domain from question_registry.
+        Falls back to checklist_subsections if question_registry is not populated.
+        """
+        tabs = DOMAIN_TO_QR_TABS.get(domain_slug, [domain_slug])
+        placeholders = ", ".join(f":tab{i}" for i in range(len(tabs)))
+        params = {f"tab{i}": t for i, t in enumerate(tabs)}
+
+        try:
+            rows = self.db.execute(text(f"""
+                SELECT check_category,
+                       bool_or(is_mandatory_green) AS is_mandatory_green
+                FROM   question_registry
+                WHERE  frontend_tab IN ({placeholders})
+                AND    is_active = true
+                GROUP  BY check_category
+                ORDER  BY check_category
+            """), params).fetchall()
+
+            if rows:
+                return [{"category": r[0], "is_mandatory_green": bool(r[1])} for r in rows]
+        except Exception as exc:
+            logger.warning(f"[DOMAIN-AGENT] question_registry query failed ({exc}), using subsections fallback")
+
+        # Fallback: checklist_subsections (existing Python metadata tables)
+        try:
+            from app.db.metadata_models import Domain, ChecklistSubsection, ChecklistQuestion
+            domain_obj = self.db.query(Domain).filter(Domain.slug == domain_slug).first()
+            if not domain_obj:
+                return []
+            subsections = (
+                self.db.query(ChecklistSubsection)
+                .filter(ChecklistSubsection.domain_id == domain_obj.id, ChecklistSubsection.is_active == True)
+                .order_by(ChecklistSubsection.sort_order)
+                .all()
+            )
+            result = []
+            for sub in subsections:
+                has_required = (
+                    self.db.query(ChecklistQuestion)
+                    .filter(ChecklistQuestion.subsection_id == sub.id, ChecklistQuestion.is_required == True)
+                    .count() > 0
+                )
+                result.append({"category": sub.name, "is_mandatory_green": has_required})
+            return result
+        except Exception as exc2:
+            logger.warning(f"[DOMAIN-AGENT] subsections fallback also failed ({exc2})")
+            return []
+
+    # ── NFR criteria block (nfr domain only) ─────────────────────────────────
+
+    def _build_nfr_criteria_block(self, review: Optional[Review]) -> str:
+        if not review or not review.report_json:
+            return ""
+        rows = (review.report_json.get("form_data") or {}).get("nfr_criteria", [])
+        if not rows:
+            return "== NFR QUANTITATIVE CRITERIA — none provided by SA =="
+        lines = [
+            f"== NFR QUANTITATIVE CRITERIA ({len(rows)} rows) ==",
+            "Use these to calibrate SCALABILITY_PERFORMANCE and HA_RESILIENCE scores.",
+            "",
+            "Category           | Criteria              | Target      | Actual       | Score | Evidence",
+            "-------------------|----------------------|-------------|--------------|-------|----------",
+        ]
+        for r in rows:
+            lines.append(" | ".join([
+                str(r.get("category",     "")).ljust(18),
+                str(r.get("criteria",     "")).ljust(21),
+                str(r.get("target_value", "")).ljust(11),
+                str(r.get("actual_value", "")).ljust(12),
+                str(r.get("score",        "?")).ljust(5),
+                str(r.get("evidence",     "(none)")),
+            ]))
+        return "\n".join(lines)

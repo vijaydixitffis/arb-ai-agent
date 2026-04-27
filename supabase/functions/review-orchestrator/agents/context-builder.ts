@@ -303,7 +303,28 @@ export async function getKnowledgeBaseContent(
   return content
 }
 
-// ── Step 11: Map agent domain to knowledge base categories ─────────
+// ── Step 11: Extract check categories from a loaded registry ─────────
+// Returns each unique check_category together with whether any question
+// in that category is mandatory_green (i.e. non_compliant = BLOCKER).
+
+export interface CheckCategoryInfo {
+  category:         string
+  isMandatoryGreen: boolean
+}
+
+export function extractCheckCategories(
+  registry: QuestionRegistryRow[]
+): CheckCategoryInfo[] {
+  const seen = new Map<string, boolean>()
+  for (const q of registry) {
+    const current = seen.get(q.check_category) ?? false
+    seen.set(q.check_category, current || q.is_mandatory_green)
+  }
+  return Array.from(seen.entries())
+    .map(([category, isMandatoryGreen]) => ({ category, isMandatoryGreen }))
+}
+
+// ── Step 12: Map agent domain to knowledge base categories ─────────
 
 export function getKbCategoriesForAgent(agentDomain: string): string[] {
   const map: Record<string, string[]> = {

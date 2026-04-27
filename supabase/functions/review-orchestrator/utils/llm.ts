@@ -3,6 +3,17 @@ export interface LLMResponse {
   tokensUsed: number
 }
 
+// Strip markdown code fences that some LLMs wrap around JSON output, then parse.
+// With Gemini's responseMimeType: 'application/json' the output is already clean,
+// but this guard handles any provider that adds fences.
+export function parseJsonFromLLM(raw: string): any {
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/m, '')
+    .replace(/\s*```\s*$/m, '')
+    .trim()
+  return JSON.parse(cleaned)
+}
+
 export interface LLMCallInput {
   systemPrompt: string
   userPrompt: string
@@ -11,22 +22,82 @@ export interface LLMCallInput {
 
 export async function callLLM(input: LLMCallInput): Promise<LLMResponse> {
   const { systemPrompt, userPrompt, model } = input
-  
-  const apiKey = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('ANTHROPIC_API_KEY')
-  
-  if (!apiKey) {
-    throw new Error('LLM API key not configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable.')
-  }
-  
-  // Determine which API to use based on model
-  if (model.startsWith('gpt')) {
+
+  if (model.startsWith('gemini')) {
+    const apiKey = Deno.env.get('GEMINI_API_KEY')
+    if (!apiKey) throw new Error('GEMINI_API_KEY is not set')
+    return await callGemini(systemPrompt, userPrompt, model, apiKey)
+  } else if (model.startsWith('gpt')) {
+    const apiKey = Deno.env.get('OPENAI_API_KEY')
+    if (!apiKey) throw new Error('OPENAI_API_KEY is not set')
     return await callOpenAI(systemPrompt, userPrompt, model, apiKey)
   } else if (model.startsWith('claude')) {
+    const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set')
     return await callAnthropic(systemPrompt, userPrompt, model, apiKey)
   } else {
     throw new Error(`Unsupported model: ${model}`)
   }
 }
+
+// ── Gemini ────────────────────────────────────────────────────────────────────
+// Docs: https://ai.google.dev/api/generate-content
+// responseMimeType: 'application/json' enforces structured JSON output (no fences).
+// Free tier: gemini-2.5-flash-lite → 15 RPM / 1000 RPD.
+
+async function callGemini(
+  systemPrompt: string,
+  userPrompt: string,
+  model: string,
+  apiKey: string
+): Promise<LLMResponse> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: {
+        parts: [{ text: systemPrompt }],
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: userPrompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Gemini API error: ${response.status} - ${error}`)
+  }
+
+  const data = await response.json()
+
+  // Guard against safety blocks or empty candidates
+  const candidate = data.candidates?.[0]
+  if (!candidate) {
+    const reason = data.promptFeedback?.blockReason ?? 'unknown'
+    throw new Error(`Gemini returned no candidates (blockReason: ${reason})`)
+  }
+  if (candidate.finishReason === 'SAFETY') {
+    throw new Error('Gemini response blocked by safety filters')
+  }
+
+  const content    = candidate.content.parts[0].text as string
+  const tokensUsed = (data.usageMetadata?.totalTokenCount as number) ?? 0
+
+  return { content, tokensUsed }
+}
+
+// ── OpenAI ────────────────────────────────────────────────────────────────────
 
 async function callOpenAI(
   systemPrompt: string,
@@ -41,28 +112,30 @@ async function callOpenAI(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: model,
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
+        { role: 'user',   content: userPrompt   },
       ],
-      temperature: 0.3,
-      max_tokens: 4000,
-      response_format: { type: 'json_object' }
-    })
+      temperature:     0.3,
+      max_tokens:      8000,
+      response_format: { type: 'json_object' },
+    }),
   })
-  
+
   if (!response.ok) {
     const error = await response.text()
     throw new Error(`OpenAI API error: ${response.status} - ${error}`)
   }
-  
-  const data = await response.json()
-  const content = data.choices[0].message.content
-  const tokensUsed = data.usage.total_tokens
-  
+
+  const data      = await response.json()
+  const content   = data.choices[0].message.content as string
+  const tokensUsed = data.usage.total_tokens as number
+
   return { content, tokensUsed }
 }
+
+// ── Anthropic ─────────────────────────────────────────────────────────────────
 
 async function callAnthropic(
   systemPrompt: string,
@@ -73,28 +146,28 @@ async function callAnthropic(
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      'x-api-key': apiKey,
-      'Content-Type': 'application/json',
+      'x-api-key':         apiKey,
+      'Content-Type':      'application/json',
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: model,
-      max_tokens: 4000,
-      system: systemPrompt,
+      model,
+      max_tokens: 8000,
+      system:     systemPrompt,
       messages: [
-        { role: 'user', content: userPrompt }
-      ]
-    })
+        { role: 'user', content: userPrompt },
+      ],
+    }),
   })
-  
+
   if (!response.ok) {
     const error = await response.text()
     throw new Error(`Anthropic API error: ${response.status} - ${error}`)
   }
-  
-  const data = await response.json()
-  const content = data.content[0].text
-  const tokensUsed = data.usage.input_tokens + data.usage.output_tokens
-  
+
+  const data       = await response.json()
+  const content    = data.content[0].text as string
+  const tokensUsed = (data.usage.input_tokens + data.usage.output_tokens) as number
+
   return { content, tokensUsed }
 }

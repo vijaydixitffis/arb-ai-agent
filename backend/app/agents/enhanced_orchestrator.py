@@ -1,282 +1,363 @@
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
+"""
+Enhanced ARB Orchestrator — aligned with the Pre-ARB AI Agent spec.
+
+Key design choices (matching the Supabase edge-function behaviour):
+- Sequential domain calls  (not parallel) — protects Gemini 15 RPM free-tier limit
+- No LLM synthesis step    — each domain agent produces its own DomainReviewPayload;
+                             the orchestrator aggregates them deterministically
+- report_json merging      — ai_review key added alongside existing form_data
+- rag_score based scoring  — domain score = summary.rag_score (1-5, LLM-authoritative)
+- Decision logic           — matches TypeScript determineDecision()
+"""
+
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
-from app.agents.enhanced_domain_agents import EnhancedDomainValidationAgent
+from datetime import datetime, timezone
+from typing import Any, Dict, List
+
+from sqlalchemy.orm import Session
+
+from app.agents.enhanced_domain_agents import EnhancedDomainValidationAgent, _rag_score_to_severity
 from app.services.artefact_service import ArtefactService
 from app.db.review_models import Review
-from app.db.metadata_models import Domain, ChecklistQuestion
-import json
+from app.db.metadata_models import ChecklistQuestion
 
 logger = logging.getLogger(__name__)
 
+# Delay between sequential domain LLM calls — stays within 15 RPM free-tier limit.
+INTER_DOMAIN_DELAY_S = 0.5
+
+
 class EnhancedARBOrchestrator:
-    """Enhanced ARB orchestrator using PostgreSQL artefact storage and domain-wise LLM calls"""
-    
+    """Orchestrates per-domain validation and aggregates results."""
+
     def __init__(self, db: Session):
-        self.db = db
-        self.domain_agent = EnhancedDomainValidationAgent(db)
+        self.db              = db
+        self.domain_agent    = EnhancedDomainValidationAgent(db)
         self.artefact_service = ArtefactService(db)
-    
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
     async def run_review(
-        self, 
-        review_id: str,
-        checklist_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Run complete ARB review with domain-wise validation and synthesis"""
-        
-        start_time = time.time()
-        logger.info(f"[ARB-ORCHESTRATOR] Starting ARB review for: {review_id}")
-        
-        # Get review details
-        logger.info(f"[ARB-ORCHESTRATOR] Fetching review details for: {review_id}")
-        review = self.db.query(Review).filter(Review.id == review_id).first()
-        if not review:
-            logger.error(f"[ARB-ORCHESTRATOR] Review {review_id} not found")
-            raise ValueError(f"Review {review_id} not found")
-        
-        logger.info(f"[ARB-ORCHESTRATOR] Review found - Solution: {review.solution_name}, Status: {review.status}, Scope Tags: {review.scope_tags}")
-        
-        # Get domains to evaluate based on scope tags
-        domains_to_evaluate = self._get_domains_from_scope(review.scope_tags)
-        logger.info(f"[ARB-ORCHESTRATOR] Domains to evaluate: {domains_to_evaluate}")
-        
-        # Get artefacts for context
-        artefacts = await self.artefact_service.get_artefacts_by_review(review_id)
-        logger.info(f"[ARB-ORCHESTRATOR] Total artefacts found: {len(artefacts)}")
-        for artefact in artefacts:
-            logger.debug(f"[ARB-ORCHESTRATOR] Artefact: {artefact.get('artefact_name')} (Domain: {artefact.get('domain_slug')}, Type: {artefact.get('artefact_type')})")
-        
-        # Run domain validation in parallel
-        logger.info(f"[ARB-ORCHESTRATOR] Starting parallel domain validation for {len(domains_to_evaluate)} domains")
-        domain_start_time = time.time()
-        domain_results = await self._run_domain_validations(
-            review_id=review_id,
-            domains=domains_to_evaluate,
-            checklist_data=checklist_data
-        )
-        domain_duration = time.time() - domain_start_time
-        logger.info(f"[ARB-ORCHESTRATOR] Domain validation completed in {domain_duration:.2f}s")
-        
-        # Log domain results summary
-        for result in domain_results:
-            logger.info(f"[ARB-ORCHESTRATOR] Domain {result.get('domain')}: Compliance={result.get('overall_compliance')}, Score={result.get('compliance_score')}, Tokens={result.get('tokens_used')}, Gaps={len(result.get('gaps', []))}")
-        
-        # Synthesize results into final decision
-        logger.info(f"[ARB-ORCHESTRATOR] Starting synthesis of domain results")
-        synthesis_start_time = time.time()
-        final_result = await self.domain_agent.synthesize_domain_results(
-            review_id=review_id,
-            domain_results=domain_results
-        )
-        synthesis_duration = time.time() - synthesis_start_time
-        logger.info(f"[ARB-ORCHESTRATOR] Synthesis completed in {synthesis_duration:.2f}s")
-        
-        # Add comprehensive metadata
-        total_duration = time.time() - start_time
-        final_result.update({
-            "review_id": review_id,
-            "solution_name": review.solution_name,
-            "scope_tags": review.scope_tags,
-            "domains_evaluated": [r.get("domain") for r in domain_results],
-            "total_tokens_used": sum(r.get("tokens_used", 0) for r in domain_results) + final_result.get("tokens_used", 0),
-            "domain_results": domain_results,
-            "review_metadata": {
-                "total_artefacts": len(await self.artefact_service.get_artefacts_by_review(review_id)),
-                "total_chunks": len(await self.artefact_service.get_relevant_chunks(review_id)),
-                "llm_calls_made": len(domains_to_evaluate) + 1,  # Domain calls + synthesis
-                "total_duration_seconds": total_duration,
-                "domain_validation_duration_seconds": domain_duration,
-                "synthesis_duration_seconds": synthesis_duration
-            }
-        })
-        
-        logger.info(f"[ARB-ORCHESTRATOR] ARB review completed - Decision: {final_result.get('decision')}, Total Duration: {total_duration:.2f}s, Total Tokens: {final_result.get('total_tokens_used')}")
-        return final_result
-    
-    def _get_domains_from_scope(self, scope_tags: List[str]) -> List[str]:
-        """Map scope tags to domain slugs"""
-        # Get all active domains from database
-        domains = self.db.query(Domain).filter(Domain.is_active == True).all()
-        domain_map = {d.slug: d for d in domains}
-        
-        # Map scope tags to domain slugs
-        domains_to_evaluate = []
-        for tag in scope_tags:
-            if tag in domain_map:
-                domains_to_evaluate.append(tag)
-        
-        # Always include general domain if present
-        if "general" in domain_map and "general" not in domains_to_evaluate:
-            domains_to_evaluate.append("general")
-        
-        return domains_to_evaluate
-    
-    async def _run_domain_validations(
         self,
         review_id: str,
-        domains: List[str],
-        checklist_data: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """Run domain validations in parallel"""
-        
-        logger.info(f"[ARB-ORCHESTRATOR] Creating validation tasks for {len(domains)} domains")
-        
-        # Create tasks for parallel execution
-        tasks = []
-        for domain_slug in domains:
-            logger.debug(f"[ARB-ORCHESTRATOR] Preparing validation task for domain: {domain_slug}")
-            # Get domain-specific checklist data
-            domain_checklist = checklist_data.get("domain_data", {}).get(domain_slug, {})
-            domain_checklist["domain_metadata"] = self._get_domain_metadata(domain_slug)
-            logger.debug(f"[ARB-ORCHESTRATOR] Domain {domain_slug} checklist items: {len(domain_checklist.get('checklist_items', []))}")
-            
-            task = self.domain_agent.validate_domain(
-                review_id=review_id,
-                domain_slug=domain_slug,
-                checklist_data=domain_checklist
-            )
-            tasks.append(task)
-        
-        # Execute all domain validations in parallel
-        logger.info(f"[ARB-ORCHESTRATOR] Executing {len(tasks)} domain validation tasks in parallel")
-        domain_results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results and handle exceptions
-        processed_results = []
-        for i, result in enumerate(domain_results):
-            domain_slug = domains[i]
-            
-            if isinstance(result, Exception):
-                # Handle validation errors
-                logger.error(f"[ARB-ORCHESTRATOR] Domain {domain_slug} validation failed: {str(result)}")
-                processed_results.append({
-                    "domain": domain_slug,
-                    "overall_compliance": "NON_COMPLIANT",
-                    "compliance_score": 0,
-                    "gaps": [{"description": f"Validation error: {str(result)}", "severity": "Critical"}],
-                    "recommendations": ["Manual review required due to validation error"],
-                    "error": str(result)
-                })
-            else:
-                logger.debug(f"[ARB-ORCHESTRATOR] Domain {domain_slug} validation completed successfully")
-                processed_results.append(result)
-        
-        logger.info(f"[ARB-ORCHESTRATOR] Processed {len(processed_results)} domain results")
-        return processed_results
-    
-    def _get_domain_metadata(self, domain_slug: str) -> Dict[str, Any]:
-        """Get metadata for a domain"""
-        domain = self.db.query(Domain).filter(
-            Domain.slug == domain_slug,
-            Domain.is_active == True
-        ).first()
-        
-        if not domain:
-            return {"name": domain_slug.title(), "description": ""}
-        
-        return {
-            "name": domain.name,
-            "description": domain.description or "",
-            "color": domain.color,
-            "icon": domain.icon,
-            "seq_number": domain.seq_number
-        }
-    
-    async def get_review_summary(self, review_id: str) -> Dict[str, Any]:
-        """Get summary of review status and progress"""
-        
-        # Get review details
+        checklist_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Run complete ARB review and return the merged report dict."""
+        t0 = time.time()
+        logger.info(f"[ORCHESTRATOR] Starting review={review_id}")
+
         review = self.db.query(Review).filter(Review.id == review_id).first()
         if not review:
             raise ValueError(f"Review {review_id} not found")
+
+        domains = self._get_domains_from_scope(review.scope_tags or [])
+        logger.info(f"[ORCHESTRATOR] Domains to process: {domains}")
+
+        # ── Sequential domain calls ───────────────────────────────────────────
+        domain_payloads: List[Dict[str, Any]] = []
+        for domain_slug in domains:
+            domain_checklist = dict(checklist_data.get("domain_data", {}).get(domain_slug, {}))
+            domain_checklist["domain_metadata"] = {
+                **self._get_domain_metadata(domain_slug),
+                "solution_name": review.solution_name,
+            }
+            try:
+                payload = await self.domain_agent.validate_domain(
+                    review_id=review_id,
+                    domain_slug=domain_slug,
+                    checklist_data=domain_checklist,
+                )
+                domain_payloads.append({"domain_slug": domain_slug, "payload": payload})
+            except Exception as exc:
+                logger.error(f"[ORCHESTRATOR] Domain {domain_slug} failed: {exc}")
+                domain_payloads.append({
+                    "domain_slug": domain_slug,
+                    "payload": {
+                        "domain": domain_slug,
+                        "session_id": review_id,
+                        "summary": {"rag_score": 3, "rag_label": "AMBER",
+                                    "rationale": f"Validation error: {exc}",
+                                    "total_findings": 0, "blocker_count": 0, "mandatory_gaps": 0},
+                        "blockers": [], "recommendations": [],
+                        "findings": [], "actions": [], "adrs": [],
+                        "error": str(exc),
+                    },
+                })
+
+            if domain_slug != domains[-1]:
+                await asyncio.sleep(INTER_DOMAIN_DELAY_S)
+
+        # ── Aggregate ─────────────────────────────────────────────────────────
+        domain_scores: Dict[str, int] = {}
+        all_findings:  List[Dict[str, Any]] = []
+        all_blockers:  List[Dict[str, Any]] = []
+        all_recommendations: List[Dict[str, Any]] = []
+        all_actions:   List[Dict[str, Any]] = []
+        all_adrs:      List[Dict[str, Any]] = []
+        total_tokens = 0
+
+        for entry in domain_payloads:
+            slug    = entry["domain_slug"]
+            payload = entry["payload"]
+            summary = payload.get("summary", {})
+
+            raw_score = summary.get("rag_score", 3)
+            rag_score = max(1, min(5, int(raw_score)))
+            domain_scores[slug] = rag_score
+
+            # Findings enriched with domain slug
+            for f in payload.get("findings", []):
+                all_findings.append({**f, "domain_slug": slug})
+
+            # Blockers (merged into findings with severity=critical in agent endpoint)
+            for b in payload.get("blockers", []):
+                all_blockers.append({**b, "domain_slug": slug})
+
+            all_recommendations.extend(payload.get("recommendations", []))
+            all_actions.extend(payload.get("actions", []))
+            all_adrs.extend(payload.get("adrs", []))
+            total_tokens += payload.get("tokens_used", 0)
+
+        scores = list(domain_scores.values())
+        aggregate_score = round(sum(scores) / len(scores)) if scores else 3
+        decision        = self._determine_decision(aggregate_score, all_findings, all_blockers, domain_scores)
+
+        total_duration_s = time.time() - t0
+        logger.info(
+            f"[ORCHESTRATOR] Done — decision={decision} agg={aggregate_score} "
+            f"findings={len(all_findings)} blockers={len(all_blockers)} "
+            f"actions={len(all_actions)} adrs={len(all_adrs)} tokens={total_tokens} "
+            f"duration={total_duration_s:.2f}s"
+        )
+
+        # ── Process NFR Criteria ───────────────────────────────────────────────
+        nfr_analysis = self._process_nfr_criteria(review, domain_scores)
         
-        # Get artefacts
-        artefacts = await self.artefact_service.get_artefacts_by_review(review_id)
-        
-        # Group artefacts by domain
-        artefacts_by_domain = {}
-        for artefact in artefacts:
-            domain = artefact["domain_slug"]
-            if domain not in artefacts_by_domain:
-                artefacts_by_domain[domain] = []
-            artefacts_by_domain[domain].append(artefact)
-        
-        return {
-            "review_id": review_id,
-            "solution_name": review.solution_name,
-            "status": review.status,
-            "decision": review.decision,
-            "scope_tags": review.scope_tags,
-            "submitted_at": review.submitted_at,
-            "reviewed_at": review.reviewed_at,
-            "total_artefacts": len(artefacts),
-            "artefacts_by_domain": artefacts_by_domain,
-            "domains_ready": list(artefacts_by_domain.keys())
+        # ── Build fullReport (merges into existing report_json) ───────────────
+        existing_report_json = review.report_json or {}
+        ai_review = {
+            "decision":         decision,
+            "aggregate_score":  aggregate_score,
+            "domain_scores":    domain_scores,
+            "findings":         all_findings,
+            "blockers":         all_blockers,
+            "recommendations":  all_recommendations,
+            "actions":          all_actions,
+            "adrs":             all_adrs,
+            "nfr_analysis":     nfr_analysis,
+            "processed_at":     datetime.now(timezone.utc).isoformat(),
         }
-    
+
+        return {
+            **existing_report_json,          # preserves form_data + any prior keys
+            "ai_review":    ai_review,
+            # Convenience top-level keys for the agent endpoint to read:
+            "decision":         decision,
+            "aggregate_score":  aggregate_score,
+            "domain_scores":    domain_scores,
+            "findings":         all_findings,
+            "blockers":         all_blockers,
+            "recommendations":  all_recommendations,
+            "actions":          all_actions,
+            "adrs":             all_adrs,
+            "total_tokens_used": total_tokens,
+            "processing_time_seconds": total_duration_s,
+            "domains_evaluated": domains,
+            "domain_payloads": [e["payload"] for e in domain_payloads],
+        }
+
+    # ── Checklist preparation ─────────────────────────────────────────────────
+
     async def prepare_checklist_data(self, review_id: str) -> Dict[str, Any]:
-        """Prepare checklist data for review from stored form data in report_json"""
-        
-        # Fetch review from database
+        """Extract checklist items from report_json.form_data.domain_data."""
         review = self.db.query(Review).filter(Review.id == review_id).first()
         if not review or not review.report_json:
-            logger.warning(f"[ORCHESTRATOR] No report_json found for review {review_id}, returning empty checklist data")
+            logger.warning(f"[ORCHESTRATOR] No report_json for review {review_id}")
             return {"domain_data": {}}
+
+        form_data = review.report_json.get("form_data", {})
+        all_questions = self.db.query(ChecklistQuestion).all()
+        question_cache = {q.question_code: q.question_text for q in all_questions}
+
+        domain_data: Dict[str, Any] = {}
+
+        # New schema: form_data.domain_data.{domain}.checklist
+        for domain, data in form_data.get("domain_data", {}).items():
+            items = []
+            checklist = data.get("checklist", {})
+            evidence  = data.get("evidence", {})
+            for code, answer in checklist.items():
+                items.append({
+                    "question_code": code,
+                    "question_text": question_cache.get(code, code),
+                    "answer":        answer,
+                    "evidence":      evidence.get(code, ""),
+                })
+            if items:
+                domain_data[domain] = {"checklist_items": items}
+
+        # Legacy schema: form_data.{domain}_checklist (backward compat)
+        for key, value in form_data.items():
+            if key.endswith("_checklist"):
+                domain = key.replace("_checklist", "")
+                if domain not in domain_data:  # Don't overwrite new schema if present
+                    items = []
+                    evidence_key = f"{domain}_evidence"
+                    evidence = form_data.get(evidence_key, {})
+                    for code, answer in value.items():
+                        items.append({
+                            "question_code": code,
+                            "question_text": question_cache.get(code, code),
+                            "answer":        answer,
+                            "evidence":      evidence.get(code, ""),
+                        })
+                    if items:
+                        domain_data[domain] = {"checklist_items": items}
+
+        logger.info(f"[ORCHESTRATOR] Checklist prepared for {len(domain_data)} domains")
+        return {"domain_data": domain_data}
+
+    def _process_nfr_criteria(self, review: Review, domain_scores: Dict[str, int]) -> Dict[str, Any]:
+        """Process NFR criteria from form data and analyze compliance"""
+        if not review.report_json:
+            return {"criteria": [], "summary": {"total_criteria": 0, "compliant_count": 0, "average_score": 0}}
         
         form_data = review.report_json.get("form_data", {})
-        domain_data_result = {}
+        nfr_criteria = form_data.get("nfr_criteria", [])
         
-        # Build a cache of question codes to question text for lookup
-        all_questions = self.db.query(ChecklistQuestion).all()
-        question_text_cache = {q.question_code: q.question_text for q in all_questions}
-        logger.info(f"[ORCHESTRATOR] Loaded {len(question_text_cache)} questions from metadata")
+        if not nfr_criteria:
+            return {"criteria": [], "summary": {"total_criteria": 0, "compliant_count": 0, "average_score": 0}}
         
-        # Process new format: domain_data.{domain}.checklist
-        if "domain_data" in form_data:
-            for domain, data in form_data["domain_data"].items():
-                checklist_items = []
-                checklist = data.get("checklist", {})
-                evidence = data.get("evidence", {})
-                
-                for question_code, answer in checklist.items():
-                    question_text = question_text_cache.get(question_code, f"Unknown question: {question_code}")
-                    checklist_items.append({
-                        "question_code": question_code,
-                        "question_text": question_text,
-                        "answer": answer,
-                        "evidence": evidence.get(question_code, "")
-                    })
-                
-                if checklist_items:
-                    domain_data_result[domain] = {"checklist_items": checklist_items}
+        processed_criteria = []
+        compliant_count = 0
+        total_score = 0
         
-        # Process old format: {domain}_checklist (backward compatibility)
-        for key, value in form_data.items():
-            if key.endswith("_checklist") and isinstance(value, dict):
-                domain = key.replace("_checklist", "")
-                evidence_key = f"{domain}_evidence"
-                evidence_data = form_data.get(evidence_key, {})
-                
-                # Merge with existing or create new
-                if domain not in domain_data_result:
-                    domain_data_result[domain] = {"checklist_items": []}
-                
-                existing_codes = {item["question_code"] for item in domain_data_result[domain]["checklist_items"]}
-                
-                for question_code, answer in value.items():
-                    if question_code not in existing_codes:
-                        question_text = question_text_cache.get(question_code, f"Unknown question: {question_code}")
-                        domain_data_result[domain]["checklist_items"].append({
-                            "question_code": question_code,
-                            "question_text": question_text,
-                            "answer": answer,
-                            "evidence": evidence_data.get(question_code, "")
-                        })
+        for criterion in nfr_criteria:
+            # Calculate compliance based on score
+            score = criterion.get("score", 0)
+            is_compliant = score >= 7  # 7+ out of 10 considered compliant
+            if is_compliant:
+                compliant_count += 1
+            total_score += score
+            
+            # Determine compliance level
+            if score >= 9:
+                compliance_level = "fully_compliant"
+            elif score >= 7:
+                compliance_level = "compliant"
+            elif score >= 5:
+                compliance_level = "partially_compliant"
+            else:
+                compliance_level = "non_compliant"
+            
+            processed_criteria.append({
+                "id": criterion.get("id"),
+                "category": criterion.get("category"),
+                "criteria": criterion.get("criteria"),
+                "target_value": criterion.get("target_value"),
+                "actual_value": criterion.get("actual_value"),
+                "score": score,
+                "compliance_level": compliance_level,
+                "is_compliant": is_compliant,
+                "evidence": criterion.get("evidence"),
+            })
         
-        logger.info(f"[ORCHESTRATOR] Prepared checklist data for {len(domain_data_result)} domains from report_json")
-        for domain, data in domain_data_result.items():
-            logger.info(f"[ORCHESTRATOR]   - {domain}: {len(data['checklist_items'])} checklist items")
+        # Calculate summary statistics
+        total_criteria = len(processed_criteria)
+        average_score = round(total_score / total_criteria, 1) if total_criteria > 0 else 0
+        compliance_percentage = round((compliant_count / total_criteria) * 100, 1) if total_criteria > 0 else 0
         
-        return {"domain_data": domain_data_result}
+        # Group by category for analysis
+        category_analysis = {}
+        for criterion in processed_criteria:
+            category = criterion["category"]
+            if category not in category_analysis:
+                category_analysis[category] = {
+                    "total": 0,
+                    "compliant": 0,
+                    "average_score": 0,
+                    "scores": []
+                }
+            
+            category_analysis[category]["total"] += 1
+            category_analysis[category]["scores"].append(criterion["score"])
+            if criterion["is_compliant"]:
+                category_analysis[category]["compliant"] += 1
+        
+        # Calculate category averages
+        for category, analysis in category_analysis.items():
+            if analysis["scores"]:
+                analysis["average_score"] = round(sum(analysis["scores"]) / len(analysis["scores"]), 1)
+                analysis["compliance_percentage"] = round((analysis["compliant"] / analysis["total"]) * 100, 1)
+            del analysis["scores"]  # Remove raw scores to clean up output
+        
+        # Generate NFR domain score (affects overall decision)
+        nfr_domain_score = min(5, max(1, round(average_score / 2)))  # Convert 0-10 to 1-5 scale
+        
+        return {
+            "criteria": processed_criteria,
+            "summary": {
+                "total_criteria": total_criteria,
+                "compliant_count": compliant_count,
+                "non_compliant_count": total_criteria - compliant_count,
+                "average_score": average_score,
+                "compliance_percentage": compliance_percentage,
+                "nfr_domain_score": nfr_domain_score
+            },
+            "category_analysis": category_analysis
+        }
+
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _get_domains_from_scope(self, scope_tags: List[str]) -> List[str]:
+        """Return ordered list of domain slugs to evaluate."""
+        from app.db.metadata_models import Domain
+        active = {d.slug for d in self.db.query(Domain).filter(Domain.is_active == True).all()}
+
+        ordered = []
+        for tag in scope_tags:
+            if tag in active and tag not in ordered:
+                ordered.append(tag)
+        # Always include general if available
+        if "general" in active and "general" not in ordered:
+            ordered.insert(0, "general")
+        return ordered
+
+    def _get_domain_metadata(self, domain_slug: str) -> Dict[str, Any]:
+        from app.db.metadata_models import Domain
+        domain = self.db.query(Domain).filter(Domain.slug == domain_slug, Domain.is_active == True).first()
+        if not domain:
+            return {"name": domain_slug.title(), "description": ""}
+        return {
+            "name":        domain.name,
+            "description": domain.description or "",
+            "seq_number":  domain.seq_number,
+        }
+
+    def _determine_decision(
+        self,
+        aggregate_score: int,
+        findings: List[Dict[str, Any]],
+        blockers: List[Dict[str, Any]],
+        domain_scores: Dict[str, int],
+    ) -> str:
+        """Map rag_scores and blockers to a DB-compatible decision string."""
+        blocker_count = len(blockers) + sum(
+            1 for f in findings if f.get("rag_score", 5) <= 1
+        )
+        major_count = sum(1 for f in findings if f.get("rag_score", 5) == 2)
+
+        security_score = domain_scores.get("security", domain_scores.get("infrastructure", 5))
+        nfr_score      = domain_scores.get("nfr", 5)
+
+        if blocker_count > 0 or security_score < 3 or nfr_score < 3:
+            return "reject"
+        if major_count >= 3:
+            return "defer"
+        if major_count >= 1 or aggregate_score < 4:
+            return "approve_with_conditions"
+        return "approve"

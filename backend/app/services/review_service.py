@@ -167,18 +167,70 @@ class ReviewService:
         return await self.orchestrator.get_review_summary(review_id)
 
     def extract_scope_tags(self, review_data: Dict[str, Any]) -> List[str]:
-        """Extract scope tags from review data (dynamic based on domains)"""
-        scope_tags = []
+        """Extract scope tags from review data (aligned with frontend logic)"""
+        VALID_DOMAINS = [
+            'general', 'business', 'application', 'integration', 
+            'data', 'infrastructure', 'devsecops', 'nfr'
+        ]
         
-        # Extract from domain_data if present
+        scope_tags = set()
+        
+        # Extract from domain_data structure (new format)
         domain_data = review_data.get("domain_data", {})
         for domain_slug, domain_info in domain_data.items():
-            if domain_info:  # Domain has data
-                scope_tags.append(domain_slug)
+            # Validate domain name
+            if domain_slug not in VALID_DOMAINS:
+                continue
+                
+            # Check if domain has meaningful data
+            if domain_info:
+                has_checklist = domain_info.get("checklist") and len(domain_info["checklist"]) > 0
+                has_evidence = domain_info.get("evidence") and len(domain_info["evidence"]) > 0
+                has_valid_answers = has_checklist and any(
+                    answer and answer in ['compliant', 'non_compliant', 'partial', 'na']
+                    for answer in domain_info["checklist"].values()
+                )
+                
+                if has_checklist or has_evidence or has_valid_answers:
+                    scope_tags.add(domain_slug)
         
-        # Extract from legacy fields if present
+        # Extract from legacy checklist/evidence fields (backward compatibility)
+        for key, value in review_data.items():
+            if key.endswith('_checklist') or key.endswith('_evidence'):
+                domain_slug = key.replace('_checklist', '').replace('_evidence', '')
+                
+                if domain_slug in VALID_DOMAINS and value and len(value) > 0:
+                    if key.endswith('_checklist'):
+                        # Validate that we have actual compliance answers
+                        has_valid_answers = any(
+                            answer and answer in ['compliant', 'non_compliant', 'partial', 'na']
+                            for answer in value.values()
+                        )
+                        if has_valid_answers:
+                            scope_tags.add(domain_slug)
+                    else:
+                        # Evidence fields count if they have content
+                        scope_tags.add(domain_slug)
+        
+        # Special handling for NFR criteria
+        nfr_criteria = review_data.get("nfr_criteria", [])
+        if nfr_criteria and len(nfr_criteria) > 0:
+            has_valid_criteria = any(
+                criterion.get("category") and criterion.get("criteria") and criterion.get("target_value")
+                for criterion in nfr_criteria
+            )
+            if has_valid_criteria:
+                scope_tags.add("nfr")
+        
+        # Extract from legacy scope_tags field if present
         if "scope_tags" in review_data:
-            scope_tags.extend(review_data["scope_tags"])
+            for tag in review_data["scope_tags"]:
+                if tag in VALID_DOMAINS:
+                    scope_tags.add(tag)
         
-        # Remove duplicates and return
-        return list(set(scope_tags))
+        # Ensure at least one tag exists (default to 'general')
+        if len(scope_tags) == 0:
+            scope_tags.add("general")
+        
+        # Return sorted list for consistency
+        return sorted(list(scope_tags))

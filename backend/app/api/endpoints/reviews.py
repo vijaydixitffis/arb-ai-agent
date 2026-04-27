@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from typing import List, Optional
+import logging
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.services.review_service import ReviewService
+from app.utils.schema_validation import validate_review_data_structure, validate_submission_completeness, get_validation_summary
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -155,10 +159,55 @@ async def get_review(review_id: str, current_user: tuple = Depends(get_current_u
 
 @router.post("/")
 async def create_review(review_data: dict, current_user: tuple = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Create a new ARB review"""
+    """Create a new ARB review with enhanced validation"""
     user_id_token, _ = current_user
     if not user_id_token:
         raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Enhanced validation - use draft mode for initial creation
+    is_draft = review_data.get('status') == 'draft'
+    
+    # Check form_data in report_json (where frontend sends it) or at root level
+    form_data = None
+    if 'report_json' in review_data and isinstance(review_data['report_json'], dict):
+        form_data = review_data['report_json'].get('form_data')
+    elif 'form_data' in review_data:
+        form_data = review_data['form_data']
+    
+    if form_data:
+        form_validation = validate_submission_completeness(form_data, is_draft=is_draft)
+        if not form_validation.is_valid:
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "error": "Form data validation failed",
+                    "validation_errors": form_validation.errors,
+                    "validation_warnings": form_validation.warnings,
+                    "summary": get_validation_summary(form_validation)
+                }
+            )
+        
+        # Log warnings for monitoring
+        if form_validation.warnings:
+            logger.warning(f"Review creation form validation warnings: {form_validation.warnings}")
+    
+    # Basic review structure validation
+    validation = validate_review_data_structure(review_data)
+    if not validation.is_valid:
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "error": "Review structure validation failed",
+                "validation_errors": validation.errors,
+                "validation_warnings": validation.warnings,
+                "summary": get_validation_summary(validation)
+            }
+        )
+    
+    # Log warnings for monitoring
+    if validation.warnings:
+        logger.warning(f"Review creation warnings: {validation.warnings}")
+    
     service = ReviewService(db)
     review = service.create_review(review_data)
     
@@ -179,15 +228,51 @@ async def create_review(review_data: dict, current_user: tuple = Depends(get_cur
         "ea_user_id": str(review.ea_user_id) if review.ea_user_id else None,
         "ea_override_notes": review.ea_override_notes,
         "ea_overridden_at": review.ea_overridden_at.isoformat() if review.ea_overridden_at else None,
-        "report_json": review.report_json
+        "report_json": review.report_json,
+        "validation_warnings": validation.warnings  # Return warnings for frontend awareness
     }
 
 @router.put("/{review_id}")
 async def update_review(review_id: str, review_data: dict, current_user: tuple = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Update an existing ARB review - EA, ARB Admin, and Solution Architect (for their own drafts)"""
+    """Update an existing ARB review with enhanced validation - EA, ARB Admin, and Solution Architect (for their own drafts)"""
     user_id_token, user_role = current_user
     if not user_id_token:
         raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Enhanced validation for form_data updates
+    # Check form_data in report_json (where frontend sends it) or at root level
+    form_data = None
+    if 'report_json' in review_data and isinstance(review_data['report_json'], dict):
+        form_data = review_data['report_json'].get('form_data')
+    elif 'form_data' in review_data:
+        form_data = review_data['form_data']
+    
+    if form_data:
+        # Determine if this is a draft or submission based on status
+        is_draft = True
+        if 'status' in review_data:
+            is_draft = review_data['status'] == 'draft'
+        else:
+            # Check current review status if not being updated
+            existing_review = service.get_review(review_id)
+            if existing_review:
+                is_draft = existing_review.status == 'draft'
+        
+        form_validation = validate_submission_completeness(form_data, is_draft=is_draft)
+        if not form_validation.is_valid:
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "error": "Form data validation failed",
+                    "validation_errors": form_validation.errors,
+                    "validation_warnings": form_validation.warnings,
+                    "summary": get_validation_summary(form_validation)
+                }
+            )
+        
+        # Log warnings for monitoring
+        if form_validation.warnings:
+            logger.warning(f"Review update form validation warnings: {form_validation.warnings}")
     
     # Allow EA and ARB Admin to update any review
     if user_role in ['enterprise_architect', 'arb_admin']:
@@ -227,7 +312,8 @@ async def update_review(review_id: str, review_data: dict, current_user: tuple =
         "ea_user_id": str(review.ea_user_id) if review.ea_user_id else None,
         "ea_override_notes": review.ea_override_notes,
         "ea_overridden_at": review.ea_overridden_at.isoformat() if review.ea_overridden_at else None,
-        "report_json": review.report_json
+        "report_json": review.report_json,
+        "validation_warnings": form_validation.warnings if 'form_data' in review_data else []
     }
 
 @router.post("/{review_id}/approve")

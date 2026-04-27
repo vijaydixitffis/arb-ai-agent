@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     
     # Gemini Configuration
     GEMINI_API_KEY: str
-    GEMINI_MODEL: str = "gemini-2.0-flash"  # Updated from gemini-1.5-pro (deprecated)
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     
     # LLM Provider Selection

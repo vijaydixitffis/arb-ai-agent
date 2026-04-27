@@ -289,15 +289,31 @@ export const reviewService = {
    */
   extractScopeTags(formData: any, artefacts?: Record<string, any[]>): string[] {
     const tags: Set<string> = new Set()
+    const VALID_DOMAINS = [
+      'general', 'business', 'application', 'integration', 
+      'data', 'infrastructure', 'devsecops', 'nfr'
+    ]
 
     // Check for dynamic domain_data structure - add domains with checklist data (new format)
     if (formData.domain_data) {
       Object.keys(formData.domain_data).forEach(domain => {
-        const hasChecklist = formData.domain_data[domain]?.checklist && 
-            Object.keys(formData.domain_data[domain].checklist).length > 0
-        const hasEvidence = formData.domain_data[domain]?.evidence && 
-            Object.keys(formData.domain_data[domain].evidence).length > 0
-        if (hasChecklist || hasEvidence) {
+        // Validate domain name
+        if (!VALID_DOMAINS.includes(domain)) {
+          console.warn(`Invalid domain '${domain}' found in domain_data, skipping`)
+          return
+        }
+
+        const domainInfo = formData.domain_data[domain]
+        const hasChecklist = domainInfo?.checklist && 
+            Object.keys(domainInfo.checklist).length > 0
+        const hasEvidence = domainInfo?.evidence && 
+            Object.keys(domainInfo.evidence).length > 0
+        const hasValidAnswers = hasChecklist && 
+            Object.values(domainInfo.checklist).some((answer: any) => 
+              answer && ['compliant', 'non_compliant', 'partial', 'na'].includes(answer)
+            )
+
+        if (hasChecklist || hasEvidence || hasValidAnswers) {
           tags.add(domain)
         }
       })
@@ -307,9 +323,27 @@ export const reviewService = {
     Object.keys(formData).forEach(key => {
       if (key.endsWith('_checklist') || key.endsWith('_evidence')) {
         const domain = key.replace(/_(checklist|evidence)$/, '')
+        
+        // Validate domain name
+        if (!VALID_DOMAINS.includes(domain)) {
+          console.warn(`Invalid domain '${domain}' found in legacy format, skipping`)
+          return
+        }
+
         const data = formData[key]
         if (data && Object.keys(data).length > 0) {
-          tags.add(domain)
+          // For checklist, validate that we have actual compliance answers
+          if (key.endsWith('_checklist')) {
+            const hasValidAnswers = Object.values(data).some((answer: any) => 
+              answer && ['compliant', 'non_compliant', 'partial', 'na'].includes(answer)
+            )
+            if (hasValidAnswers) {
+              tags.add(domain)
+            }
+          } else {
+            // For evidence, any non-empty evidence counts
+            tags.add(domain)
+          }
         }
       }
     })
@@ -317,18 +351,51 @@ export const reviewService = {
     // Add domains from artefacts - if artefacts exist for a domain, include it
     if (artefacts) {
       Object.entries(artefacts).forEach(([domain, domainArtefacts]) => {
+        // Validate domain name
+        if (!VALID_DOMAINS.includes(domain)) {
+          console.warn(`Invalid domain '${domain}' found in artefacts, skipping`)
+          return
+        }
+
         if (domainArtefacts && domainArtefacts.length > 0) {
-          tags.add(domain)
+          // Only count domains with successfully uploaded artefacts (have IDs or file data)
+          const hasValidArtefacts = domainArtefacts.some((artefact: any) => 
+            artefact.id || artefact.file
+          )
+          if (hasValidArtefacts) {
+            tags.add(domain)
+          }
         }
       })
     }
 
-    // If no tags found, default to 'general' to ensure AI review runs
+    // Special handling for NFR criteria - if any NFR criteria are defined, add 'nfr' tag
+    if (formData.nfr_criteria && formData.nfr_criteria.length > 0) {
+      const hasValidCriteria = formData.nfr_criteria.some((criterion: any) => 
+        criterion.category && criterion.criteria && criterion.target_value
+      )
+      if (hasValidCriteria) {
+        tags.add('nfr')
+      }
+    }
+
+    // Ensure at least one tag exists for AI review to run
     if (tags.size === 0) {
+      console.warn('No valid scope tags found, defaulting to "general"')
       tags.add('general')
     }
 
-    return Array.from(tags)
+    // Sort tags for consistency
+    const sortedTags = Array.from(tags).sort()
+    
+    // Log extraction summary for debugging
+    console.log(`Scope tags extracted: [${sortedTags.join(', ')}] from:`, {
+      domainDataDomains: Object.keys(formData.domain_data || {}),
+      artefactDomains: Object.keys(artefacts || {}),
+      nfrCriteriaCount: formData.nfr_criteria?.length || 0
+    })
+
+    return sortedTags
   },
 
   /**

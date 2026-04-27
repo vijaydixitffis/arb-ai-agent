@@ -1,17 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { OrchestratorAgent } from "./agents/orchestrator.ts"
-import { GeneralDomainAgent } from "./agents/general.ts"
-import { BusinessDomainAgent } from "./agents/business.ts"
-import { ApplicationDomainAgent } from "./agents/application.ts"
-import { IntegrationDomainAgent } from "./agents/integration.ts"
-import { DataDomainAgent } from "./agents/data.ts"
-import { SecurityDomainAgent } from "./agents/security.ts"
-import { InfrastructureDomainAgent } from "./agents/infrastructure.ts"
-import { DevSecOpsDomainAgent } from "./agents/devsecops.ts"
-import { NFRAgent } from "./agents/nfr.ts"
 import { extractTextFromArtifact } from "./utils/text-extraction.ts"
-import { callLLM } from "./utils/llm.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,28 +13,27 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  try {
-    const { reviewId } = await req.json()
-    
-    if (!reviewId) {
-      throw new Error('reviewId is required')
-    }
-
-    const supabase = createClient(
-      Deno.env.get('PROJECT_URL') ?? '',
-      Deno.env.get('SERVICE_ROLE_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: req.headers.get('Authorization') ?? '' }
-        }
+  // Declare outside try so the catch block can reference them for audit logging.
+  let reviewId: string | undefined
+  const supabase = createClient(
+    Deno.env.get('PROJECT_URL') ?? '',
+    Deno.env.get('SERVICE_ROLE_KEY') ?? '',
+    {
+      global: {
+        headers: { Authorization: req.headers.get('Authorization') ?? '' }
       }
-    )
+    }
+  )
+
+  try {
+    const body = await req.json()
+    reviewId = body.reviewId
+
+    if (!reviewId) throw new Error('reviewId is required')
 
     console.log(`Starting review processing for reviewId: ${reviewId}`)
 
-    // ============================================================================
-    // STEP 1: Fetch review and validate
-    // ============================================================================
+    // ── STEP 1: Fetch review and validate ─────────────────────────────────────
     const { data: review, error: reviewError } = await supabase
       .from('reviews')
       .select('*')
@@ -59,223 +48,176 @@ serve(async (req) => {
       throw new Error(`Review already processed: ${review.status}`)
     }
 
-    // Update status to in_review
     await supabase
       .from('reviews')
-      .update({ 
-        status: 'in_review',
-        submitted_at: new Date().toISOString()
-      })
+      .update({ status: 'in_review', submitted_at: new Date().toISOString() })
       .eq('id', reviewId)
 
     console.log(`Review ${reviewId} status updated to in_review`)
 
-    // ============================================================================
-    // STEP 2: Load knowledge base content based on scope tags
-    // ============================================================================
-    // Map scope tags to knowledge base categories and principles
-    const categoryMap: Record<string, string[]> = {
-      'general': ['ea_principles', 'ea_standards'],
-      'business': ['ea_principles', 'ea_standards'],
-      'application': ['ea_principles', 'ea_standards'],
-      'software': ['ea_principles', 'ea_standards'],
-      'integration': ['integration_principles', 'ea_standards'],
-      'api': ['integration_principles', 'ea_standards'],
-      'security': ['ea_principles', 'ea_standards'],
-      'data': ['ea_principles', 'ea_standards'],
-      'infra': ['ea_principles', 'ea_standards'],
-      'devsecops': ['ea_principles', 'ea_standards'],
-      'engg_quality': ['ea_principles', 'ea_standards'],
-      'nfr': ['ea_principles', 'ea_standards']
+    // ── STEP 2: Extract artifact text (optional — new schema stores in artefact_uploads) ──
+    let artifactText = ''
+    if (review.artifact_path) {
+      console.log(`Downloading artifact from: ${review.artifact_path}`)
+      const { data: artifactData, error: downloadError } = await supabase
+        .storage
+        .from('review-artifacts')
+        .download(review.artifact_path)
+
+      if (downloadError || !artifactData) {
+        console.warn(`Artifact download failed (non-fatal): ${downloadError?.message}`)
+      } else {
+        artifactText = await extractTextFromArtifact(
+          artifactData,
+          review.artifact_file_type || 'pdf'
+        )
+        console.log(`Extracted ${artifactText.length} characters from artifact`)
+      }
     }
 
-    // Get all relevant categories for the scope tags
-    const relevantCategories = review.scope_tags.flatMap(tag => categoryMap[tag] || [])
-    const uniqueCategories = [...new Set(relevantCategories)]
-
-    // Fetch knowledge base content
-    const { data: knowledgeBaseData } = await supabase
-      .from('knowledge_base')
-      .select('*')
-      .in('category', uniqueCategories)
-      .eq('is_active', true)
-      .order('created_at', { ascending: true })
-
-    if (!knowledgeBaseData || knowledgeBaseData.length === 0) {
-      console.warn('No knowledge base content found for the given scope')
-    }
-
-    console.log(`Loaded ${knowledgeBaseData?.length || 0} knowledge base entries`)
-
-    // Concatenate knowledge base content into system prompt
-    const knowledgeBase = knowledgeBaseData
-      ?.map(entry => `## ${entry.title}\n\n${entry.content}`)
-      .join('\n\n---\n\n') || ''
-
-    // ============================================================================
-    // STEP 3: Parse artifact from Storage
-    // ============================================================================
-    console.log(`Downloading artifact from: ${review.artifact_path}`)
-    const { data: artifactData, error: downloadError } = await supabase
-      .storage
-      .from('review-artifacts')
-      .download(review.artifact_path)
-
-    if (downloadError || !artifactData) {
-      throw new Error(`Failed to download artifact: ${downloadError?.message}`)
-    }
-
-    const artifactText = await extractTextFromArtifact(
-      artifactData,
-      review.artifact_file_type || 'pdf'
-    )
-    console.log(`Extracted ${artifactText.length} characters from artifact`)
-
-    // ============================================================================
-    // STEP 4: Initialize domain agents
-    // ============================================================================
-    const domainAgents = {
-      general: new GeneralDomainAgent(),
-      business: new BusinessDomainAgent(),
-      application: new ApplicationDomainAgent(),
-      integration: new IntegrationDomainAgent(),
-      data: new DataDomainAgent(),
-      security: new SecurityDomainAgent(),
-      infrastructure: new InfrastructureDomainAgent(),
-      devsecops: new DevSecOpsDomainAgent(),
-      nfr: new NFRAgent()
-    }
-
-    // ============================================================================
-    // STEP 5: Run orchestrator with domain agents
-    // ============================================================================
+    // ── STEP 3: Run orchestrator ───────────────────────────────────────────────
     const orchestrator = new OrchestratorAgent()
-    const startTime = Date.now()
+    const startTime    = Date.now()
 
     const reviewResult = await orchestrator.validateReview({
       review,
-      reportJson: review.report_json,
+      reportJson:   review.report_json,
       artifactText,
       supabase,
-      domainAgents,
-      scopeTags: review.scope_tags
+      scopeTags:    review.scope_tags ?? [],
     })
 
     const processingTime = Date.now() - startTime
     console.log(`Review processing completed in ${processingTime}ms`)
 
-    // ============================================================================
-    // STEP 6: Store results in database
-    // ============================================================================
-    
-    // Update reviews table
+    // ── STEP 4: Persist results ────────────────────────────────────────────────
+
+    // 4a. Update reviews table (fullReport already merges form_data + ai_review)
     const { error: updateError } = await supabase
       .from('reviews')
       .update({
-        status: 'ea_review',
-        decision: reviewResult.decision,
-        report_json: reviewResult.fullReport,
-        tokens_used: reviewResult.tokensUsed,
+        status:             'ea_review',
+        decision:           reviewResult.decision,
+        report_json:        reviewResult.fullReport,
+        tokens_used:        reviewResult.tokensUsed,
         processing_time_ms: processingTime,
-        llm_raw_response: reviewResult.rawResponse,
-        reviewed_at: new Date().toISOString()
+        llm_raw_response:   reviewResult.rawResponse,
+        reviewed_at:        new Date().toISOString(),
       })
       .eq('id', reviewId)
 
     if (updateError) throw updateError
 
-    // Insert domain scores
-    for (const [domain, score] of Object.entries(reviewResult.domainScores || {})) {
-      await supabase.from('domain_scores').insert({
-        review_id: reviewId,
-        domain,
-        score
-      })
+    // 4b. Domain scores (upsert to handle re-runs)
+    for (const [domain, score] of Object.entries(reviewResult.domainScores)) {
+      const { error: dsErr } = await supabase
+        .from('domain_scores')
+        .upsert(
+          { review_id: reviewId, domain, score },
+          { onConflict: 'review_id,domain' }
+        )
+      if (dsErr) console.error(`domain_scores upsert failed for ${domain}:`, dsErr.message)
     }
 
-    // Insert findings
-    if (reviewResult.findings && Array.isArray(reviewResult.findings)) {
-      for (const finding of reviewResult.findings) {
-        await supabase.from('findings').insert({
-          review_id: reviewId,
-          domain: finding.domain,
-          principle_id: finding.principle_id,
-          severity: finding.severity,
-          finding: finding.finding,
-          recommendation: finding.recommendation
-        })
-      }
+    // 4c. Findings — delete old then insert fresh (avoids duplicates on re-run)
+    await supabase.from('findings').delete().eq('review_id', reviewId)
+    if (reviewResult.findings.length > 0) {
+      const { error: findErr } = await supabase
+        .from('findings')
+        .insert(
+          reviewResult.findings.map(f => ({
+            review_id:      reviewId,
+            domain:         f.domain,
+            principle_id:   f.principle_id   || null,
+            severity:       f.severity,
+            finding:        f.finding,
+            recommendation: f.recommendation || null,
+          }))
+        )
+      if (findErr) console.error('findings insert failed:', findErr.message)
     }
 
-    // Insert ADRs
-    if (reviewResult.adrs && Array.isArray(reviewResult.adrs)) {
-      for (const adr of reviewResult.adrs) {
-        await supabase.from('adrs').insert({
-          review_id: reviewId,
-          adr_id: adr.id,
-          decision: adr.decision,
-          rationale: adr.rationale,
-          owner: adr.owner,
-          target_date: adr.target_date
-        })
-      }
+    // 4d. ADRs
+    if (reviewResult.adrs.length > 0) {
+      const { error: adrErr } = await supabase
+        .from('adrs')
+        .insert(
+          reviewResult.adrs.map(adr => ({
+            review_id:   reviewId,
+            adr_id:      adr.id,
+            decision:    adr.decision,
+            rationale:   adr.rationale,
+            context:     adr.context    ?? null,
+            owner:       adr.owner      ?? null,
+            target_date: adr.target_date ?? null,
+          }))
+        )
+      if (adrErr) console.error('adrs insert failed:', adrErr.message)
     }
 
-    // Insert actions
-    if (reviewResult.actions && Array.isArray(reviewResult.actions)) {
-      for (const action of reviewResult.actions) {
-        const dueDate = action.due_days 
-          ? new Date(Date.now() + action.due_days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-          : null
-        
-        await supabase.from('actions').insert({
-          review_id: reviewId,
-          action_text: action.action,
-          owner_role: action.owner_role,
-          due_days: action.due_days,
-          due_date: dueDate
-        })
-      }
+    // 4e. Actions
+    if (reviewResult.actions.length > 0) {
+      const { error: actErr } = await supabase
+        .from('actions')
+        .insert(
+          reviewResult.actions.map(action => {
+            const dueDate = action.due_days
+              ? new Date(Date.now() + action.due_days * 86_400_000)
+                  .toISOString()
+                  .split('T')[0]
+              : null
+            return {
+              review_id:  reviewId,
+              action_text: action.action,
+              owner_role:  action.owner_role,
+              due_days:    action.due_days,
+              due_date:    dueDate,
+            }
+          })
+        )
+      if (actErr) console.error('actions insert failed:', actErr.message)
     }
 
-    // Log completion
+    // 4f. Audit log
     await supabase.from('audit_log').insert({
       review_id: reviewId,
-      user_id: null,
+      user_id:   null,
       user_role: 'system',
-      action: 'llm_processed',
+      action:    'llm_processed',
       metadata: {
-        tokens_used: reviewResult.tokensUsed,
+        tokens_used:       reviewResult.tokensUsed,
         processing_time_ms: processingTime,
-        model: review.llm_model || 'gpt-4o',
-        domains_reviewed: review.scope_tags
-      }
+        model:             review.llm_model || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite',
+        domains_reviewed:  review.scope_tags,
+        findings_count:    reviewResult.findings.length,
+        adrs_count:        reviewResult.adrs.length,
+        actions_count:     reviewResult.actions.length,
+      },
     })
 
     console.log(`Review ${reviewId} processing completed successfully`)
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        reviewId, 
-        report: reviewResult.fullReport,
-        decision: reviewResult.decision
+      JSON.stringify({
+        success:  true,
+        reviewId,
+        decision: reviewResult.decision,
+        report:   reviewResult.fullReport,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
   } catch (error) {
     console.error('Error in review-orchestrator:', error)
-    
-    // Log error if we have reviewId
-    if (typeof reviewId !== 'undefined') {
+
+    if (reviewId) {
       try {
-        await supabase?.from('audit_log').insert({
+        await supabase.from('audit_log').insert({
           review_id: reviewId,
-          user_id: null,
+          user_id:   null,
           user_role: 'system',
-          action: 'processing_error',
-          metadata: { error: error.message }
+          action:    'processing_error',
+          metadata:  { error: error.message },
         })
       } catch (logError) {
         console.error('Failed to log error:', logError)

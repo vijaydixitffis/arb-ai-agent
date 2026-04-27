@@ -8,8 +8,10 @@ import { Textarea } from '../components/ui/Textarea'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import ARBHeader from '../components/ARB/ARBHeader'
+import NFRCriteriaSection from '../components/ARB/NFRCriteriaSection'
 import { reviewService } from '../services/python/reviewService'
 import { artefactService } from '../services/python/artefactService'
+import { validateSubmissionCompleteness, getValidationSummary } from '../utils/schemaValidation'
 
 export default function ARBSubmission() {
   const navigate = useNavigate()
@@ -129,7 +131,7 @@ export default function ARBSubmission() {
       evidence: Record<string, string>       // question_code -> evidence
     }>,
     // NFR criteria (special case)
-    nfr_criteria: [] as Array<{ category: string; criteria: string; target_value: string; actual_value: string; score: number; evidence?: string }>,
+    nfr_criteria: [] as Array<{ id: string; category: string; criteria: string; target_value: string; actual_value: string; score: number; evidence?: string }>,
   })
 
   const handleNext = async () => {
@@ -140,20 +142,27 @@ export default function ARBSubmission() {
         // Extract scope tags from form data and artefacts
         const scopeTags = reviewService.extractScopeTags(formData, artefacts)
         
+        // Ensure form_data includes all required schema fields
+        const completeFormData = {
+          ...formData,
+          solution_name: formData.solution_name || formData.project_name || '',
+          scope_tags: scopeTags
+        }
+
         if (!formData.reviewId) {
           // Create new review
           const draftData = {
-            solution_name: formData.solution_name || formData.project_name || '',
+            solution_name: completeFormData.solution_name,
             scope_tags: scopeTags,
             sa_user_id: user?.id || '',
-            form_data: formData
+            form_data: completeFormData
           }
           const response = await reviewService.createDraft(draftData)
           setFormData({ ...formData, reviewId: response.id, scope_tags: scopeTags })
         } else {
           // Update existing review
           const updateData = {
-            form_data: formData,
+            form_data: completeFormData,
             scope_tags: scopeTags
           }
           await reviewService.updateDraft(formData.reviewId, updateData)
@@ -213,23 +222,31 @@ export default function ARBSubmission() {
 
       let reviewId = submissionId
 
-      // 1. Create or update review record
+      // 1. Ensure form_data includes all required schema fields
+      const completeFormData = {
+        ...formData,
+        reviewId: reviewId || '',
+        solution_name: formData.solution_name || formData.project_name,
+        scope_tags: scopeTags
+      }
+
+      // Create or update review record
       if (reviewId) {
         // Update existing draft/submitted review
         await reviewService.updateDraft(reviewId, {
-          solution_name: formData.project_name,
+          solution_name: completeFormData.solution_name,
           scope_tags: scopeTags,
           sa_user_id: user?.id || '',
-          form_data: formData,
+          form_data: completeFormData,
           status: 'submitted'
         })
       } else {
         // Create new review as submitted
         const review = await reviewService.createDraft({
-          solution_name: formData.project_name,
+          solution_name: completeFormData.solution_name,
           scope_tags: scopeTags,
           sa_user_id: user?.id || '',
-          form_data: formData
+          form_data: completeFormData
         })
         reviewId = review.id
         setSubmissionId(reviewId)
@@ -263,18 +280,45 @@ export default function ARBSubmission() {
         }
       }
 
-      // 3. Validate completeness
-      const validation = await reviewService.validateCompleteness(reviewId)
+      // 3. Validate schema compliance and completeness
+      const schemaValidation = validateSubmissionCompleteness(completeFormData, artefacts)
 
-      if (!validation.isComplete) {
-        // Show validation errors to user
-        const errorMessage = validation.errors.join('\n')
-        if (confirm(`Submission is incomplete:\n\n${errorMessage}\n\nWould you like to save as submitted and complete later?`)) {
-          // Save as submitted but don't trigger backend
-          alert('Submission saved as submitted. Please complete the missing fields before marking as ready for review.')
-          navigate('/dashboard')
+      if (!schemaValidation.isValid) {
+        const validationSummary = getValidationSummary(schemaValidation)
+        if (confirm(`Schema validation failed:\n\n${validationSummary}\n\nWould you like to save as draft and fix the issues?`)) {
+          // Save as draft but don't submit
+          await reviewService.updateDraft(reviewId!, {
+            form_data: completeFormData,
+            status: 'draft'
+          })
+          alert('Saved as draft. Please fix the validation errors before submitting.')
+          return
+        } else {
+          return
         }
-        return
+      }
+
+      // Show warnings if any
+      if (schemaValidation.warnings.length > 0) {
+        const warningSummary = schemaValidation.warnings.join('\n• ')
+        if (!confirm(`Validation warnings detected:\n\n• ${warningSummary}\n\nContinue with submission?`)) {
+          return
+        }
+      }
+
+      // 4. Backend validation (if available)
+      try {
+        const backendValidation = await reviewService.validateCompleteness(reviewId)
+        if (!backendValidation.isComplete) {
+          const errorMessage = backendValidation.errors.join('\n')
+          if (confirm(`Backend validation failed:\n\n${errorMessage}\n\nWould you like to save as submitted and complete later?`)) {
+            alert('Submission saved as submitted. Please complete the missing fields before marking as ready for review.')
+            navigate('/dashboard')
+          }
+          return
+        }
+      } catch (error) {
+        console.warn('Backend validation not available, proceeding with frontend validation only')
       }
 
       // 4. Save as submitted - review process will be triggered later from dashboard
@@ -385,8 +429,19 @@ export default function ARBSubmission() {
           return <div className="text-center py-8">Loading domain metadata...</div>
         }
         
+        // Check if this is the NFR step (last step)
+        const isNFRStep = currentStep === domains.length + 1
+        
         return (
           <div className="space-y-6">
+            {/* NFR Quantitative Criteria Section - only for NFR step */}
+            {isNFRStep && (
+              <NFRCriteriaSection
+                nfr_criteria={formData.nfr_criteria}
+                onChange={(criteria) => setFormData({ ...formData, nfr_criteria: criteria })}
+              />
+            )}
+            
             {/* Artefact Upload Section */}
             <div>
               <label className="block text-sm font-medium mb-4">Artefacts</label>
@@ -626,7 +681,7 @@ export default function ARBSubmission() {
                     {subsections.find((s: any) => s.name === selectedSubsection)?.questions?.map((question: any) => {
                       const options = questionOptionsByQuestion[question.question_code]?.map((o: any) => o.value) || ['compliant', 'non_compliant', 'partial', 'na']
                       const optionLabels = questionOptionsByQuestion[question.question_code]?.map((o: any) => o.label) || ['Yes', 'No', 'Partial', 'NA']
-                      const currentIndex = options.indexOf((formData as any)[`${domainSlug}_checklist`]?.[question.question_code] as string) || 0
+                      const currentIndex = options.indexOf(formData.domain_data?.[domainSlug]?.checklist?.[question.question_code] as string) || 0
 
                       return (
                         <div key={question.id} className="border rounded-lg p-4">
@@ -642,9 +697,15 @@ export default function ARBSubmission() {
                                 onChange={(e) => {
                                   setFormData({
                                     ...formData,
-                                    [`${domainSlug}_checklist`]: {
-                                      ...(formData as any)[`${domainSlug}_checklist`],
-                                      [question.question_code]: options[parseInt(e.target.value)],
+                                    domain_data: {
+                                      ...formData.domain_data,
+                                      [domainSlug]: {
+                                        ...formData.domain_data?.[domainSlug],
+                                        checklist: {
+                                          ...formData.domain_data?.[domainSlug]?.checklist,
+                                          [question.question_code]: options[parseInt(e.target.value)],
+                                        },
+                                      },
                                     },
                                   })
                                 }}
@@ -661,13 +722,19 @@ export default function ARBSubmission() {
                           </div>
                           <Input
                             placeholder="Evidence notes"
-                            value={(formData as any)[`${domainSlug}_evidence`]?.[question.question_code] || ''}
+                            value={formData.domain_data?.[domainSlug]?.evidence?.[question.question_code] || ''}
                             onChange={(e) => {
                               setFormData({
                                 ...formData,
-                                [`${domainSlug}_evidence`]: {
-                                  ...(formData as any)[`${domainSlug}_evidence`],
-                                  [question.question_code]: e.target.value,
+                                domain_data: {
+                                  ...formData.domain_data,
+                                  [domainSlug]: {
+                                    ...formData.domain_data?.[domainSlug],
+                                    evidence: {
+                                      ...formData.domain_data?.[domainSlug]?.evidence,
+                                      [question.question_code]: e.target.value,
+                                    },
+                                  },
                                 },
                               })
                             }}

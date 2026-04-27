@@ -408,7 +408,7 @@ function QuestionDialog({ subsection, domain, formData, setFormData, onClose }: 
         <div className="space-y-6">
           {subsection.questions?.map((question: any) => {
             const currentAnswer = formData.domain_data?.[domain]?.checklist?.[question.question_code]
-            const currentIndex = Math.max(0, options.indexOf(currentAnswer))
+            const currentIndex = options.indexOf(currentAnswer) >= 0 ? options.indexOf(currentAnswer) : 0
 
             return (
               <div key={question.id} className="border rounded-lg p-4">
