@@ -1,0 +1,612 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--r:var(--border-radius-md);--rl:var(--border-radius-lg)}
+body{font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);padding:0 0 2rem}
+
+.top-bar{display:flex;align-items:center;gap:12px;padding:1rem 0 1.25rem;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:1.25rem}
+.top-bar h1{font-size:16px;font-weight:500}
+.badge{font-size:11px;padding:3px 8px;border-radius:999px;font-weight:500;white-space:nowrap}
+.b-blue{background:var(--color-background-info);color:var(--color-text-info)}
+.b-green{background:var(--color-background-success);color:var(--color-text-success)}
+.b-amber{background:var(--color-background-warning);color:var(--color-text-warning)}
+.b-red{background:var(--color-background-danger);color:var(--color-text-danger)}
+.b-gray{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+
+.tabs{display:flex;gap:4px;overflow-x:auto;padding-bottom:0;margin-bottom:1.25rem;border-bottom:0.5px solid var(--color-border-tertiary)}
+.tab{font-size:12px;padding:6px 12px;border-radius:6px 6px 0 0;cursor:pointer;white-space:nowrap;color:var(--color-text-secondary);border:none;background:transparent;font-family:var(--font-sans)}
+.tab.active{background:var(--color-background-primary);color:var(--color-text-primary);font-weight:500;border:0.5px solid var(--color-border-tertiary);border-bottom:0.5px solid var(--color-background-primary);margin-bottom:-0.5px}
+.tab:hover:not(.active){background:var(--color-background-secondary);color:var(--color-text-primary)}
+
+.panel{display:none}.panel.active{display:block}
+
+.section-title{font-size:13px;font-weight:500;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em;margin:1.5rem 0 .75rem;display:flex;align-items:center;gap:8px}
+.section-title::after{content:'';flex:1;height:0.5px;background:var(--color-border-tertiary)}
+
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--rl);overflow:hidden;margin-bottom:1rem}
+.card-header{display:flex;align-items:center;gap:8px;padding:.75rem 1rem;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+.card-header .label{font-size:13px;font-weight:500;flex:1}
+.card-body{padding:0}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{padding:6px 10px;text-align:left;font-size:11px;font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border-tertiary);white-space:nowrap}
+td{padding:7px 10px;border-bottom:0.5px solid var(--color-border-tertiary);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--color-background-secondary)}
+
+.field-name{font-family:var(--font-mono);font-size:11.5px;color:var(--color-text-info);white-space:nowrap}
+.type-pill{font-family:var(--font-mono);font-size:10px;padding:1px 6px;border-radius:4px;background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);white-space:nowrap}
+.req{font-size:10px;color:var(--color-text-danger);font-weight:500}
+.opt{font-size:10px;color:var(--color-text-secondary)}
+.desc{color:var(--color-text-secondary);font-size:12px}
+.enum-vals{font-family:var(--font-mono);font-size:10px;color:var(--color-text-warning)}
+.agent-tag{font-size:10px;padding:1px 5px;border-radius:3px;background:var(--color-background-info);color:var(--color-text-info);font-family:var(--font-mono)}
+
+.note-box{border-radius:var(--r);padding:.75rem 1rem;font-size:12.5px;line-height:1.6;margin-bottom:1rem;border:0.5px solid}
+.note-blue{background:var(--color-background-info);border-color:var(--color-border-info);color:var(--color-text-info)}
+.note-amber{background:var(--color-background-warning);border-color:var(--color-border-warning);color:var(--color-text-warning)}
+.note-green{background:var(--color-background-success);border-color:var(--color-border-success);color:var(--color-text-success)}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem}
+@media(max-width:600px){.grid2,.grid3{grid-template-columns:1fr}}
+
+.domain-row{display:flex;align-items:center;gap:8px;padding:.5rem .75rem;border-radius:var(--r);border:0.5px solid var(--color-border-tertiary);font-size:12.5px;cursor:pointer;margin-bottom:4px;background:var(--color-background-primary)}
+.domain-row:hover{background:var(--color-background-secondary)}
+.domain-row .icon{font-size:14px;width:20px;text-align:center}
+.domain-row .name{flex:1;font-weight:500}
+
+.json-block{font-family:var(--font-mono);font-size:11px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--r);padding:.75rem 1rem;overflow-x:auto;line-height:1.7;white-space:pre;color:var(--color-text-primary)}
+.jk{color:var(--color-text-info)}.jv{color:var(--color-text-success)}.js{color:var(--color-text-warning)}.jc{color:var(--color-text-secondary);font-style:italic}
+
+.rag-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.rag-dot{width:10px;height:10px;border-radius:50%}
+
+.flow-step{display:flex;align-items:flex-start;gap:10px;margin-bottom:.75rem;padding:.625rem .875rem;border-radius:var(--r);border:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary)}
+.step-num{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;flex-shrink:0;background:var(--color-background-info);color:var(--color-text-info)}
+.step-body{flex:1}.step-title{font-size:13px;font-weight:500;margin-bottom:2px}
+.step-desc{font-size:12px;color:var(--color-text-secondary);line-height:1.5}
+</style>
+
+<div class="top-bar">
+  <div>
+    <h1>Pre-ARB AI Agent — Domain Table Schemas</h1>
+    <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">LLM-populated structured records per architecture domain · Orchestrator envelope + 9 domain agents</div>
+  </div>
+  <span class="badge b-blue">v1.0</span>
+</div>
+
+<div class="tabs" id="tabs">
+  <button class="tab active" onclick="showTab('overview')">Overview</button>
+  <button class="tab" onclick="showTab('envelope')">Orchestrator envelope</button>
+  <button class="tab" onclick="showTab('summary')">Summary</button>
+  <button class="tab" onclick="showTab('blockers')">Blockers</button>
+  <button class="tab" onclick="showTab('recommendations')">Recommendations</button>
+  <button class="tab" onclick="showTab('findings')">Findings</button>
+  <button class="tab" onclick="showTab('actions')">Actions</button>
+  <button class="tab" onclick="showTab('adrs')">ADRs</button>
+  <button class="tab" onclick="showTab('domains')">Domain fields</button>
+  <button class="tab" onclick="showTab('prompt')">LLM prompt spec</button>
+</div>
+
+<div id="overview" class="panel active">
+  <div class="note-box note-blue">
+    Each domain agent calls the LLM API once with its retrieved knowledge-base context + SA artifacts, and returns a structured JSON object conforming to the <strong>DomainReviewPayload</strong> schema. The orchestrator merges all payloads into a single <strong>ReviewSession</strong> document and drives the HITL gate.
+  </div>
+  <div class="section-title">Agent-to-table mapping</div>
+  <div class="card">
+    <div class="card-header"><span class="label">Which agent populates which tables</span></div>
+    <table>
+      <thead><tr><th>Agent</th><th>Domain key</th><th>Tables populated</th><th>Mandatory green?</th></tr></thead>
+      <tbody>
+        <tr><td><span class="agent-tag">AppArchAgent</span></td><td><span class="field-name">application</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">SoftwareArchAgent</span></td><td><span class="field-name">software</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">IntegrationAgent</span></td><td><span class="field-name">integration</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs + IntegrationCatalogue rows</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">APIArchAgent</span></td><td><span class="field-name">api</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">SecurityAgent</span></td><td><span class="field-name">security</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="req">MUST be GREEN</span></td></tr>
+        <tr><td><span class="agent-tag">DataArchAgent</span></td><td><span class="field-name">data</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">InfraAgent</span></td><td><span class="field-name">infra</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">DevSecOpsAgent</span></td><td><span class="field-name">devsecops</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">EnggQualityAgent</span></td><td><span class="field-name">engg_quality</span></td><td>Summary · Blockers · Recommendations · Findings · Actions · ADRs</td><td><span class="opt">No</span></td></tr>
+        <tr><td><span class="agent-tag">NFRAgent</span></td><td><span class="field-name">nfr</span></td><td>NFR Scorecard rows (separate table — not domain review)</td><td><span class="req">Security NFR: GREEN</span></td></tr>
+        <tr><td><span class="agent-tag">OrchestratorAgent</span></td><td><span class="field-name">—</span></td><td>ReviewSession envelope · cross-platform impact · aggregate score · final decision</td><td><span class="opt">Aggregates all</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-title">Table hierarchy</div>
+  <div class="grid2">
+    <div>
+      <div class="card">
+        <div class="card-header"><span class="label">ReviewSession (root)</span><span class="badge b-gray">Orchestrator</span></div>
+        <div style="padding:.75rem 1rem;font-size:12.5px;color:var(--color-text-secondary);line-height:1.6">
+          Top-level document. One per ARB review. Contains session metadata, aggregate score, recommended decision, and an array of <strong>DomainReviewPayload</strong> objects (one per agent) plus the NFR scorecard array and cross-platform impact records.
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><span class="label">DomainReviewPayload (per agent)</span><span class="badge b-blue">Each domain agent</span></div>
+        <div style="padding:.75rem 1rem;font-size:12.5px;color:var(--color-text-secondary);line-height:1.6">
+          One object per domain. Contains: <strong>Summary</strong> (1 record) · <strong>Blockers[]</strong> · <strong>Recommendations[]</strong> · <strong>Findings[]</strong> · <strong>Actions[]</strong> · <strong>ADRs[]</strong>. Each table is an array that the LLM populates in a single structured output call.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">RAG score scale</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Score</th><th>Label</th><th>Meaning</th><th>Approval implication</th></tr></thead>
+      <tbody>
+        <tr><td><strong>5</strong></td><td><span class="badge b-green">GREEN 5</span></td><td>Fully compliant. All evidence present. No gaps.</td><td>Eligible for unconditional approval</td></tr>
+        <tr><td><strong>4</strong></td><td><span class="badge b-green">GREEN 4</span></td><td>Compliant with minor tracked actions only.</td><td>Eligible for approval; actions tracked post-ARB</td></tr>
+        <tr><td><strong>3</strong></td><td><span class="badge b-amber">AMBER 3</span></td><td>Partially compliant. Gaps with mitigation plan.</td><td>Approve with conditions (except Security/DR)</td></tr>
+        <tr><td><strong>2</strong></td><td><span class="badge b-amber">AMBER 2</span></td><td>Significant gaps. Actions required before go-live.</td><td>Approve with conditions; EA monitors closure</td></tr>
+        <tr><td><strong>1</strong></td><td><span class="badge b-red">RED 1</span></td><td>Fails mandatory standard. Evidence absent.</td><td>BLOCKER — Defer or Reject. Re-review required.</td></tr>
+        <tr><td><strong>W</strong></td><td><span class="badge b-gray">WAIVER</span></td><td>Known deviation with documented rationale.</td><td>EA approval required; time-bound expiry date mandatory</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="envelope" class="panel">
+  <div class="note-box note-blue">
+    The <strong>ReviewSession</strong> is the root object the Orchestrator creates before dispatching domain agents. All fields in the outer envelope are set by the Orchestrator; domain agents write only into their own <code>domain_reviews[]</code> slot.
+  </div>
+  <div class="section-title">ReviewSession — root envelope fields</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>R/O</th><th>Set by</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">session_id</td><td><span class="type-pill">string (UUID)</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">Unique review session identifier. Format: <code>ARB-{YYYYMMDD}-{UUID4}</code></td></tr>
+        <tr><td class="field-name">arb_ref</td><td><span class="type-pill">string</span></td><td class="req">R</td><td>Intake form</td><td class="desc">EARR/PTX ticket reference e.g. <code>EARR-2026-0042</code></td></tr>
+        <tr><td class="field-name">solution_name</td><td><span class="type-pill">string</span></td><td class="req">R</td><td>Intake form</td><td class="desc">Full name of the platform or solution under review</td></tr>
+        <tr><td class="field-name">review_version</td><td><span class="type-pill">string</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">Semantic version of this dossier e.g. <code>v1.0-draft</code>, <code>v2.0-final</code></td></tr>
+        <tr><td class="field-name">presenting_team</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td>Intake form</td><td class="desc">Names and roles: SA, LOB owner, platform owner</td></tr>
+        <tr><td class="field-name">assigned_ea</td><td><span class="type-pill">string</span></td><td class="req">R</td><td>Workflow engine</td><td class="desc">Enterprise Architect responsible for Gate 2 review</td></tr>
+        <tr><td class="field-name">intake_completed_at</td><td><span class="type-pill">ISO8601</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">Timestamp when SA completed Gate 1 and SLA clock started</td></tr>
+        <tr><td class="field-name">agent_run_at</td><td><span class="type-pill">ISO8601</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">Timestamp when domain agents completed their parallel run</td></tr>
+        <tr><td class="field-name">classification</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td>Intake form</td><td class="desc"><span class="enum-vals">INTERNAL_RESTRICTED · INTERNAL · CONFIDENTIAL</span></td></tr>
+        <tr><td class="field-name">aggregate_rag_score</td><td><span class="type-pill">number 1–5</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">Computed by Orchestrator after all domain agents complete. Weighted: Security/DR failures override others.</td></tr>
+        <tr><td class="field-name">aggregate_rag_label</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc"><span class="enum-vals">GREEN · AMBER · RED · WAIVER</span></td></tr>
+        <tr><td class="field-name">recommended_decision</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc"><span class="enum-vals">APPROVE · APPROVE_WITH_CONDITIONS · DEFER · REJECT</span></td></tr>
+        <tr><td class="field-name">decision_rationale</td><td><span class="type-pill">string</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">2–4 sentence synthesis explaining the recommended decision. Agent-generated.</td></tr>
+        <tr><td class="field-name">domain_reviews</td><td><span class="type-pill">DomainReviewPayload[]</span></td><td class="req">R</td><td>Domain agents</td><td class="desc">Array of 9 domain review objects. Each agent populates its own slot.</td></tr>
+        <tr><td class="field-name">nfr_scorecard</td><td><span class="type-pill">NFRScorecardRow[]</span></td><td class="req">R</td><td>NFRAgent</td><td class="desc">One row per NFR category. See NFR Scorecard schema.</td></tr>
+        <tr><td class="field-name">cross_platform_impacts</td><td><span class="type-pill">CrossPlatformImpact[]</span></td><td class="opt">O</td><td>Orchestrator</td><td class="desc">Downstream platforms affected by this solution's changes</td></tr>
+        <tr><td class="field-name">consolidated_blockers</td><td><span class="type-pill">Blocker[]</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">Flattened array of all RED blockers across all domains. Populated after domain agents finish.</td></tr>
+        <tr><td class="field-name">consolidated_actions</td><td><span class="type-pill">Action[]</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc">Flattened action register across all domains. Populated after domain agents finish.</td></tr>
+        <tr><td class="field-name">ea_review</td><td><span class="type-pill">EAReview</span></td><td class="opt">O</td><td>EA (Gate 2)</td><td class="desc">EA decision, overrides, annotations. Null until Gate 2 is triggered.</td></tr>
+        <tr><td class="field-name">kb_sources_cited</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td>RAG Agent</td><td class="desc">List of knowledge-base document IDs and versions retrieved and used in this session</td></tr>
+        <tr><td class="field-name">arb_meeting_scheduled_at</td><td><span class="type-pill">ISO8601</span></td><td class="opt">O</td><td>Orchestrator (post EA)</td><td class="desc">ARB meeting datetime. Set after EA approves and dossier is published.</td></tr>
+        <tr><td class="field-name">status</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td>Orchestrator</td><td class="desc"><span class="enum-vals">DRAFT · EA_REVIEW · REWORK · PUBLISHED · ARB_COMPLETE · CLOSED</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-title">EAReview sub-object</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">ea_name</td><td><span class="type-pill">string</span></td><td class="desc">Name of reviewing EA</td></tr>
+        <tr><td class="field-name">reviewed_at</td><td><span class="type-pill">ISO8601</span></td><td class="desc">Timestamp of EA decision</td></tr>
+        <tr><td class="field-name">ea_decision</td><td><span class="type-pill">enum</span></td><td class="desc"><span class="enum-vals">ACCEPT_ALL · ACCEPT_WITH_OVERRIDES · SEND_BACK_FOR_REWORK</span></td></tr>
+        <tr><td class="field-name">overrides</td><td><span class="type-pill">EAOverride[]</span></td><td class="desc">Each agent-generated finding, recommendation or ADR the EA modified. Includes original and revised value plus rationale.</td></tr>
+        <tr><td class="field-name">ea_annotations</td><td><span class="type-pill">string</span></td><td class="desc">Free-text EA commentary appended to the dossier</td></tr>
+        <tr><td class="field-name">rework_gaps</td><td><span class="type-pill">string[]</span></td><td class="desc">Specific items SA must address if decision is SEND_BACK_FOR_REWORK</td></tr>
+        <tr><td class="field-name">final_decision</td><td><span class="type-pill">enum</span></td><td class="desc">EA-confirmed decision after override: <span class="enum-vals">APPROVE · APPROVE_WITH_CONDITIONS · DEFER · REJECT</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="summary" class="panel">
+  <div class="note-box note-blue">
+    One <strong>DomainSummary</strong> record per domain per review. The LLM generates this after completing all findings and scoring, so it can reference confirmed scores and blockers. It is the single source of truth for the domain's headline status.
+  </div>
+  <div class="section-title">DomainSummary — fields</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>R/O</th><th>Description & LLM instruction</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">domain</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Fixed value set by agent: <span class="enum-vals">APPLICATION · SOFTWARE · INTEGRATION · API · SECURITY · DATA · INFRA · DEVSECOPS · ENGG_QUALITY</span></td></tr>
+        <tr><td class="field-name">rag_score</td><td><span class="type-pill">number 1–5</span></td><td class="req">R</td><td class="desc">Integer RAG score 1–5. LLM must derive this from findings — not infer independently. If any blocker exists, score must be ≤ 1.</td></tr>
+        <tr><td class="field-name">rag_label</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">GREEN · AMBER · RED · WAIVER</span> — derived automatically from score.</td></tr>
+        <tr><td class="field-name">overall_readiness</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Domain-level decision: <span class="enum-vals">APPROVE · APPROVE_WITH_CONDITIONS · DEFER · REJECT</span></td></tr>
+        <tr><td class="field-name">executive_summary</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">3–5 sentences. Must cover: current state assessment, key strengths, critical gaps, and ARB readiness. No bullet points. Evidence-based only.</td></tr>
+        <tr><td class="field-name">compliant_areas</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td class="desc">Bullet-style list of 3–6 areas where the solution meets or exceeds the standard. Each item references a specific standard or pattern.</td></tr>
+        <tr><td class="field-name">gap_areas</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td class="desc">Bullet-style list of gaps. Each item must link to a Finding ID (e.g. "API-F02: Missing idempotency controls").</td></tr>
+        <tr><td class="field-name">blocker_count</td><td><span class="type-pill">integer</span></td><td class="req">R</td><td class="desc">Number of RED-scored blockers in this domain. Derived from Blockers[]. Must be consistent.</td></tr>
+        <tr><td class="field-name">action_count</td><td><span class="type-pill">integer</span></td><td class="req">R</td><td class="desc">Total open actions in this domain. Derived from Actions[].</td></tr>
+        <tr><td class="field-name">adr_count</td><td><span class="type-pill">integer</span></td><td class="req">R</td><td class="desc">Total ADRs generated for this domain.</td></tr>
+        <tr><td class="field-name">domain_specific_scores</td><td><span class="type-pill">object</span></td><td class="opt">O</td><td class="desc">Sub-scores for domain-specific dimensions. Keys and required sub-fields vary by domain — see Domain Fields tab. E.g. for Security: <code>authn_score, rbac_score, vapt_score, encryption_score</code>.</td></tr>
+        <tr><td class="field-name">evidence_quality</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Quality of SA-provided evidence: <span class="enum-vals">COMPLETE · PARTIAL · INSUFFICIENT · ABSENT</span>. If ABSENT → score must be RED.</td></tr>
+        <tr><td class="field-name">kb_references</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td class="desc">IDs of knowledge-base documents used for scoring this domain. Mandatory for auditability.</td></tr>
+        <tr><td class="field-name">generated_at</td><td><span class="type-pill">ISO8601</span></td><td class="req">R</td><td class="desc">Timestamp of LLM generation. Set by agent wrapper, not LLM.</td></tr>
+        <tr><td class="field-name">model_used</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">LLM model identifier used for this domain e.g. <code>gpt-4o-2024-05-13</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="blockers" class="panel">
+  <div class="note-box note-amber">
+    <strong>Blocker = any RED-scored issue.</strong> Only populate this table if the LLM identifies a finding that must resolve before approval. The orchestrator flattens all domain Blockers[] arrays into the root <code>consolidated_blockers</code> array. Blockers drive DEFER or REJECT recommendations automatically.
+  </div>
+  <div class="section-title">Blocker — fields</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>R/O</th><th>Description & LLM instruction</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">blocker_id</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Format: <code>{DOMAIN_CODE}-BLK-{NN}</code> e.g. <code>SEC-BLK-01</code>. Sequential within domain.</td></tr>
+        <tr><td class="field-name">domain</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Domain this blocker belongs to. Same enum as DomainSummary.domain.</td></tr>
+        <tr><td class="field-name">title</td><td><span class="type-pill">string ≤120 chars</span></td><td class="req">R</td><td class="desc">Short, specific title. Must name the specific control or standard violated. E.g. "VAPT evidence not submitted for external-facing APIs". Never generic titles like "Security gap".</td></tr>
+        <tr><td class="field-name">description</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">1–3 sentences. What is missing or failing, with specific reference to the SA artifact or evidence that is absent. Must name the artifact.</td></tr>
+        <tr><td class="field-name">violated_standard</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Exact name and version of the standard or principle being violated e.g. "Security Standards v2.4 §3.2 — VAPT Requirements".</td></tr>
+        <tr><td class="field-name">impact</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Business or technical consequence if not resolved. Must be specific, not "may cause issues".</td></tr>
+        <tr><td class="field-name">resolution_required</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Exact artifact or evidence the SA must produce to close this blocker. Specific enough for SA to act immediately.</td></tr>
+        <tr><td class="field-name">links_to_finding_id</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Finding ID that this blocker is derived from. Maintains traceability.</td></tr>
+        <tr><td class="field-name">links_to_action_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">Action ID created to track resolution. Populated after Actions[] is generated.</td></tr>
+        <tr><td class="field-name">is_security_or_dr</td><td><span class="type-pill">boolean</span></td><td class="req">R</td><td class="desc">True if this blocker relates to Security or DR. These categories override all other domain scores — aggregate cannot be Green if this is true.</td></tr>
+        <tr><td class="field-name">status</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">OPEN · RESOLVED · WAIVED</span>. Default OPEN at agent generation time.</td></tr>
+        <tr><td class="field-name">kb_evidence_ref</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td class="desc">KB document IDs that define the standard this blocker violates. Mandatory.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="recommendations" class="panel">
+  <div class="note-box note-green">
+    Recommendations are <strong>proactive, forward-looking</strong> and distinct from Findings (which are reactive). Each recommendation must be actionable and reference a specific approved pattern or standard. The LLM must generate at least one recommendation per domain, even for GREEN domains.
+  </div>
+  <div class="section-title">Recommendation — fields</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>R/O</th><th>Description & LLM instruction</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">recommendation_id</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Format: <code>{DOMAIN_CODE}-REC-{NN}</code> e.g. <code>INT-REC-02</code></td></tr>
+        <tr><td class="field-name">domain</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Domain this recommendation belongs to</td></tr>
+        <tr><td class="field-name">priority</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">CRITICAL · HIGH · MEDIUM · LOW</span>. CRITICAL = must apply before production. HIGH = apply within current quarter.</td></tr>
+        <tr><td class="field-name">title</td><td><span class="type-pill">string ≤120 chars</span></td><td class="req">R</td><td class="desc">Action-verb lead: "Implement circuit breaker pattern for all downstream API calls". Must be specific to this solution, not generic advice.</td></tr>
+        <tr><td class="field-name">rationale</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Why this recommendation applies to this specific solution. 1–2 sentences. Reference the SA artifact that prompted this.</td></tr>
+        <tr><td class="field-name">approved_pattern_ref</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Name and version of the approved pattern or standard being recommended e.g. "Resilience Patterns Catalogue v3.1 §4 — Circuit Breaker".</td></tr>
+        <tr><td class="field-name">benefit</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Specific benefit if adopted: improved reliability, security posture, cost reduction, etc. Must be measurable or verifiable.</td></tr>
+        <tr><td class="field-name">implementation_hint</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">Optional: concrete first step for the SA. E.g. "Configure Polly circuit breaker in the API Gateway layer with 50% failure threshold, 30s open duration".</td></tr>
+        <tr><td class="field-name">applies_to_adr_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">If this recommendation should result in an ADR, link to its ADR ID here.</td></tr>
+        <tr><td class="field-name">applies_to_finding_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">If this recommendation directly addresses a finding, link here for traceability.</td></tr>
+        <tr><td class="field-name">is_agent_generated</td><td><span class="type-pill">boolean</span></td><td class="req">R</td><td class="desc">True = LLM generated. False = EA manually added during Gate 2 review.</td></tr>
+        <tr><td class="field-name">kb_source_ref</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td class="desc">KB document IDs that underpin this recommendation.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="findings" class="panel">
+  <div class="note-box note-blue">
+    Findings are the atomic unit of domain validation output. Each finding maps one-to-many to actions and zero-to-one to ADRs. The LLM must produce findings only from evidence in the SA artifacts and retrieved KB context — never inferred from general knowledge alone.
+  </div>
+  <div class="section-title">Finding — fields</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>R/O</th><th>Description & LLM instruction</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">finding_id</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Format: <code>{DOMAIN_CODE}-F{NN}</code> e.g. <code>SEC-F03</code>. Sequential per domain.</td></tr>
+        <tr><td class="field-name">domain</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Domain this finding belongs to</td></tr>
+        <tr><td class="field-name">check_category</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">The specific validation check area — values vary by domain. See Domain Fields tab for per-domain enums.</td></tr>
+        <tr><td class="field-name">severity</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">BLOCKER · HIGH · MEDIUM · LOW · INFO</span>. BLOCKER = RED score, triggers Blocker record. INFO = informational only, no action required.</td></tr>
+        <tr><td class="field-name">rag_score</td><td><span class="type-pill">number 1–5</span></td><td class="req">R</td><td class="desc">RAG score for this specific check. 1 = RED (BLOCKER). Must be consistent with severity.</td></tr>
+        <tr><td class="field-name">title</td><td><span class="type-pill">string ≤140 chars</span></td><td class="req">R</td><td class="desc">Specific, artifact-referencing title. Format: "[what is wrong] in [specific component/artifact]". Never: "Security issue found".</td></tr>
+        <tr><td class="field-name">description</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">2–4 sentences. What was found, in which SA artifact, and why it is non-compliant. Quote the specific standard clause.</td></tr>
+        <tr><td class="field-name">evidence_source</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Specific SA artifact name where the gap was found e.g. "Integration Catalogue v3 — Row 7 (Payment Gateway integration)", or "HLD diagram page 4 — absence of circuit breaker notation".</td></tr>
+        <tr><td class="field-name">standard_violated</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Exact standard, policy or principle violated with version. Pulled from KB context.</td></tr>
+        <tr><td class="field-name">impact</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Specific risk if unresolved — operational, security, regulatory or business impact. Must be qualified.</td></tr>
+        <tr><td class="field-name">recommendation</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">1–2 sentences: specific remediation action. What artifact to produce, what pattern to apply. Links to approved pattern where available.</td></tr>
+        <tr><td class="field-name">is_blocker</td><td><span class="type-pill">boolean</span></td><td class="req">R</td><td class="desc">True if severity is BLOCKER. Must match severity field. Orchestrator uses this to generate consolidated_blockers.</td></tr>
+        <tr><td class="field-name">links_to_action_ids</td><td><span class="type-pill">string[]</span></td><td class="opt">O</td><td class="desc">Action IDs generated to address this finding. Populated after Actions[] is generated in the same LLM call.</td></tr>
+        <tr><td class="field-name">links_to_adr_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">ADR ID if this finding results in an architecture decision record.</td></tr>
+        <tr><td class="field-name">waiver_eligible</td><td><span class="type-pill">boolean</span></td><td class="opt">O</td><td class="desc">True if this finding could be closed with a time-bound waiver rather than immediate remediation. Only for non-security findings.</td></tr>
+        <tr><td class="field-name">kb_reference</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td class="desc">KB document IDs used to reach this finding. Mandatory for traceability and EA review.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="actions" class="panel">
+  <div class="note-box note-amber">
+    Actions are the post-ARB accountability mechanism. Every BLOCKER and every AMBER finding must have at least one action. Actions generated by the agent are provisional — EA may adjust owner, due date or verification method at Gate 2. The consolidated action register is the primary monitoring surface post-ARB.
+  </div>
+  <div class="section-title">Action — fields</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>R/O</th><th>Description & LLM instruction</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">action_id</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Format: <code>{DOMAIN_CODE}-ACT-{NN}</code> e.g. <code>DATA-ACT-01</code>. Sequential per domain.</td></tr>
+        <tr><td class="field-name">domain</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Domain this action belongs to</td></tr>
+        <tr><td class="field-name">action_type</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">BLOCKER_RESOLUTION · AMBER_CONDITION · DOCUMENTATION · EVIDENCE_SUBMISSION · WAIVER_APPLICATION · POST_GO_LIVE</span></td></tr>
+        <tr><td class="field-name">title</td><td><span class="type-pill">string ≤160 chars</span></td><td class="req">R</td><td class="desc">Action-verb lead. Must be specific enough for the owner to act without reading the finding. E.g. "Submit VAPT test report covering all 12 external API endpoints to the ARB portal".</td></tr>
+        <tr><td class="field-name">description</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">Additional context if title alone is insufficient. References the finding and standard.</td></tr>
+        <tr><td class="field-name">proposed_owner</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Role or name proposed by agent. E.g. "Solution Architect", "Security Team Lead". EA confirms or re-assigns at Gate 2.</td></tr>
+        <tr><td class="field-name">confirmed_owner</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">EA-confirmed owner. Null until Gate 2. After Gate 2, this is the authoritative owner.</td></tr>
+        <tr><td class="field-name">proposed_due_date</td><td><span class="type-pill">string (relative)</span></td><td class="req">R</td><td class="desc">Relative timeframe proposed by agent: <span class="enum-vals">BEFORE_ARB · WITHIN_2_WEEKS · WITHIN_30_DAYS · WITHIN_60_DAYS · WITHIN_QUARTER · PRE_GO_LIVE</span></td></tr>
+        <tr><td class="field-name">confirmed_due_date</td><td><span class="type-pill">ISO8601 date</span></td><td class="opt">O</td><td class="desc">Absolute due date confirmed by EA at Gate 2. Null until Gate 2. Used by orchestrator for SLA reminders.</td></tr>
+        <tr><td class="field-name">verification_method</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">How completion will be verified. Must be specific: "EA reviews submitted VAPT PDF in ARB portal and marks action closed", not "Evidence submitted".</td></tr>
+        <tr><td class="field-name">is_conditional_approval_gate</td><td><span class="type-pill">boolean</span></td><td class="req">R</td><td class="desc">True if this action must be closed before APPROVE_WITH_CONDITIONS converts to full APPROVE. Orchestrator uses this to keep the conditional approval open.</td></tr>
+        <tr><td class="field-name">links_to_finding_id</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Finding ID that generated this action. Mandatory for traceability.</td></tr>
+        <tr><td class="field-name">links_to_blocker_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">Blocker ID if this action resolves a blocker. Orchestrator uses this to close the blocker when action is confirmed complete.</td></tr>
+        <tr><td class="field-name">links_to_adr_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">ADR ID if this action is required to close a conditional ADR.</td></tr>
+        <tr><td class="field-name">status</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">OPEN · IN_PROGRESS · EVIDENCE_SUBMITTED · CLOSED · WAIVED</span>. Default OPEN at generation time.</td></tr>
+        <tr><td class="field-name">reminder_schedule</td><td><span class="type-pill">string[]</span></td><td class="opt">O</td><td class="desc">Relative reminder triggers e.g. ["T-14d", "T-7d", "T-1d", "T+0_overdue"]. Orchestrator converts these to absolute datetimes post Gate 2.</td></tr>
+        <tr><td class="field-name">closure_evidence</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">URL or artifact reference submitted as evidence of completion. Null until owner submits. EA validates this before closing.</td></tr>
+        <tr><td class="field-name">closed_by_ea_at</td><td><span class="type-pill">ISO8601</span></td><td class="opt">O</td><td class="desc">Timestamp when EA confirmed closure. Null until closed.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="adrs" class="panel">
+  <div class="note-box note-blue">
+    ADRs capture significant architecture decisions — both new decisions made during this review and existing deviations formalised as waivers. The LLM must generate an ADR for every significant technology choice, pattern adoption, or deviation. Trivial implementation details do not need ADRs.
+  </div>
+  <div class="section-title">ADR — fields</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>R/O</th><th>Description & LLM instruction</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">adr_id</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Format: <code>ADR-{DOMAIN_CODE}-{NN}</code> e.g. <code>ADR-INT-03</code>. Sequential per domain.</td></tr>
+        <tr><td class="field-name">domain</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc">Domain this ADR belongs to</td></tr>
+        <tr><td class="field-name">adr_type</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">NEW_DECISION · WAIVER · DEVIATION · RATIFICATION · DEPRECATION</span></td></tr>
+        <tr><td class="field-name">title</td><td><span class="type-pill">string ≤160 chars</span></td><td class="req">R</td><td class="desc">Format: "Decision: [verb + specific choice]" or "Waiver: [specific deviation]". Must be specific. E.g. "Decision: Adopt event-driven integration for all async payment flows".</td></tr>
+        <tr><td class="field-name">context</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">2–4 sentences. Why this decision was needed: the problem or constraint that forced a choice. Include business and technical context.</td></tr>
+        <tr><td class="field-name">options_considered</td><td><span class="type-pill">ADROption[]</span></td><td class="req">R</td><td class="desc">Array of 2–4 options evaluated. Each option has: <code>option_label</code> (A/B/C), <code>description</code>, <code>pros</code> (string[]), <code>cons</code> (string[]). LLM must enumerate real alternatives, not strawmen.</td></tr>
+        <tr><td class="field-name">decision</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">The chosen option and its key parameters. Specific, not vague. E.g. "Adopt Option B: Azure Service Bus event streaming with at-least-once delivery, idempotent consumers, and DLQ after 3 retries".</td></tr>
+        <tr><td class="field-name">rationale</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Why this option was chosen over alternatives. Must reference architecture principles or approved patterns from KB.</td></tr>
+        <tr><td class="field-name">consequences</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Both positive outcomes and trade-offs or risks accepted. Honest — do not omit downsides.</td></tr>
+        <tr><td class="field-name">mitigations</td><td><span class="type-pill">string[]</span></td><td class="opt">O</td><td class="desc">Specific mitigations for the risks in consequences. Each mitigation maps to an Action ID where applicable.</td></tr>
+        <tr><td class="field-name">proposed_owner</td><td><span class="type-pill">string</span></td><td class="req">R</td><td class="desc">Role responsible for implementing and monitoring this ADR e.g. "Integration Architect", "SA — [Name]".</td></tr>
+        <tr><td class="field-name">confirmed_owner</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">EA-confirmed owner. Null until Gate 2.</td></tr>
+        <tr><td class="field-name">proposed_target_date</td><td><span class="type-pill">string (relative)</span></td><td class="req">R</td><td class="desc">Relative target: <span class="enum-vals">IMMEDIATE · WITHIN_30_DAYS · WITHIN_QUARTER · NEXT_RELEASE · ONGOING</span></td></tr>
+        <tr><td class="field-name">confirmed_target_date</td><td><span class="type-pill">ISO8601 date</span></td><td class="opt">O</td><td class="desc">Absolute date confirmed by EA at Gate 2.</td></tr>
+        <tr><td class="field-name">waiver_expiry_date</td><td><span class="type-pill">ISO8601 date</span></td><td class="opt">O</td><td class="desc">Mandatory if adr_type = WAIVER. No open-ended waivers permitted. Orchestrator blocks waiver ADRs without this field.</td></tr>
+        <tr><td class="field-name">links_to_finding_ids</td><td><span class="type-pill">string[]</span></td><td class="opt">O</td><td class="desc">Finding IDs that prompted this ADR.</td></tr>
+        <tr><td class="field-name">links_to_action_ids</td><td><span class="type-pill">string[]</span></td><td class="opt">O</td><td class="desc">Action IDs associated with this ADR's implementation or monitoring.</td></tr>
+        <tr><td class="field-name">status</td><td><span class="type-pill">enum</span></td><td class="req">R</td><td class="desc"><span class="enum-vals">PROPOSED · ACCEPTED · CONDITIONAL · REJECTED · SUPERSEDED</span>. PROPOSED at generation time. EA changes to ACCEPTED or CONDITIONAL at Gate 2.</td></tr>
+        <tr><td class="field-name">confluence_page_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">Confluence page ID after write-back. Null until published post-ARB.</td></tr>
+        <tr><td class="field-name">cmdb_record_id</td><td><span class="type-pill">string</span></td><td class="opt">O</td><td class="desc">CMDB record ID after write-back. Null until published post-ARB.</td></tr>
+        <tr><td class="field-name">kb_references</td><td><span class="type-pill">string[]</span></td><td class="req">R</td><td class="desc">KB document IDs used to evaluate options and justify the decision.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="domains" class="panel">
+  <div class="note-box note-blue">
+    Each domain agent receives a domain-specific <strong>check_category</strong> enum and a set of <strong>domain_specific_scores</strong> sub-fields in DomainSummary. These constrain the LLM's output space and ensure structured, comparable scores across reviews.
+  </div>
+  <div class="section-title">Application Architecture agent</div>
+  <div class="grid2">
+    <div class="card"><div class="card-header"><span class="label">check_category enum</span></div>
+    <table><tbody>
+      <tr><td class="field-name">TECH_STACK_COMPLIANCE</td><td class="desc">Technology choices vs approved standards list</td></tr>
+      <tr><td class="field-name">SBOM_AND_DEPENDENCY_HEALTH</td><td class="desc">SBOM completeness, EoL/EoS library flags</td></tr>
+      <tr><td class="field-name">ARCHITECTURE_STYLE</td><td class="desc">Monolith/microservices alignment to target</td></tr>
+      <tr><td class="field-name">RESILIENCE_PATTERNS</td><td class="desc">Circuit breaker, retry, timeout, bulkhead</td></tr>
+      <tr><td class="field-name">VERSIONING_COMPATIBILITY</td><td class="desc">API versioning, backward compatibility policy</td></tr>
+      <tr><td class="field-name">TECH_DEBT_TRACKING</td><td class="desc">Tech debt register existence and currency</td></tr>
+      <tr><td class="field-name">DOCUMENTATION_CURRENCY</td><td class="desc">HLD, ADRs, runbooks up-to-date</td></tr>
+      <tr><td class="field-name">MONITORING_AND_ALERTING</td><td class="desc">Observability, logging, distributed tracing</td></tr>
+    </tbody></table></div>
+    <div class="card"><div class="card-header"><span class="label">domain_specific_scores sub-fields</span></div>
+    <table><tbody>
+      <tr><td class="field-name">tech_stack_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">sbom_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">resilience_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">documentation_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">eos_risk_flag</td><td class="desc">boolean — true if any EoL/EoS library present</td></tr>
+      <tr><td class="field-name">architecture_style</td><td class="desc">enum: MONOLITH · MICROSERVICES · MODULAR_MONOLITH · HYBRID</td></tr>
+    </tbody></table></div>
+  </div>
+
+  <div class="section-title">Integration Architecture agent</div>
+  <div class="grid2">
+    <div class="card"><div class="card-header"><span class="label">check_category enum</span></div>
+    <table><tbody>
+      <tr><td class="field-name">CATALOGUE_COMPLETENESS</td><td class="desc">All integrations documented with full metadata</td></tr>
+      <tr><td class="field-name">PATTERN_COMPLIANCE</td><td class="desc">API/Event/File/MSG pattern vs approved patterns</td></tr>
+      <tr><td class="field-name">IDEMPOTENCY</td><td class="desc">Idempotency controls on all async integrations</td></tr>
+      <tr><td class="field-name">THROTTLING_RATE_LIMITING</td><td class="desc">Rate limiting, backpressure, throttle config</td></tr>
+      <tr><td class="field-name">INTEGRATION_SECURITY</td><td class="desc">mTLS, OAuth scopes, secret handling per integration</td></tr>
+      <tr><td class="field-name">NFR_COVERAGE</td><td class="desc">Scalability/HA/DR NFRs per integration row</td></tr>
+      <tr><td class="field-name">ERROR_HANDLING</td><td class="desc">DLQ, retry, circuit breaker at integration layer</td></tr>
+    </tbody></table></div>
+    <div class="card"><div class="card-header"><span class="label">domain_specific_scores + Integration Catalogue row</span></div>
+    <table><tbody>
+      <tr><td class="field-name">catalogue_completeness_pct</td><td class="desc">number 0–100 — % of integrations fully documented</td></tr>
+      <tr><td class="field-name">missing_nfr_count</td><td class="desc">integer — integrations with missing NFR metadata</td></tr>
+      <tr><td class="field-name">integration_catalogue</td><td class="desc">IntegrationCatalogueRow[] — parsed from SA artifact. Fields: sr, provider, consumer, pattern, type, method, interaction_style, frequency, data_flows, nfr_scalability, nfr_security, nfr_ha, compliance_flag</td></tr>
+    </tbody></table></div>
+  </div>
+
+  <div class="section-title">Security Architecture agent</div>
+  <div class="grid2">
+    <div class="card"><div class="card-header"><span class="label">check_category enum</span></div>
+    <table><tbody>
+      <tr><td class="field-name">AUTHN_AUTHZ</td><td class="desc">Authentication and authorisation model</td></tr>
+      <tr><td class="field-name">RBAC_IAM</td><td class="desc">Role-based access control completeness</td></tr>
+      <tr><td class="field-name">KEY_VAULT_SECRETS</td><td class="desc">Key Vault usage, no secrets in code</td></tr>
+      <tr><td class="field-name">PKI_ENCRYPTION</td><td class="desc">TLS version, cert management, data-at-rest encryption</td></tr>
+      <tr><td class="field-name">VAPT_EVIDENCE</td><td class="desc">VAPT test results for all external surfaces</td></tr>
+      <tr><td class="field-name">ENDPOINT_PROTECTION</td><td class="desc">WAF, DDoS, endpoint scanning</td></tr>
+      <tr><td class="field-name">REGULATORY_COMPLIANCE</td><td class="desc">GDPR, PCI-DSS, SOX, internal policy</td></tr>
+      <tr><td class="field-name">RESPONSIBLE_AI</td><td class="desc">Eliza pathway compliance (if AI/ML components present)</td></tr>
+    </tbody></table></div>
+    <div class="card"><div class="card-header"><span class="label">domain_specific_scores sub-fields</span><span class="badge b-red">Mandatory GREEN</span></div>
+    <table><tbody>
+      <tr><td class="field-name">authn_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">rbac_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">vapt_score</td><td class="desc">1–5 — if evidence absent: 1 (RED, automatic blocker)</td></tr>
+      <tr><td class="field-name">encryption_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">regulatory_compliance_score</td><td class="desc">1–5</td></tr>
+      <tr><td class="field-name">vapt_report_date</td><td class="desc">ISO8601 — date of most recent VAPT. Flag if >12 months old.</td></tr>
+      <tr><td class="field-name">is_ai_ml_present</td><td class="desc">boolean — triggers Responsible AI pathway check</td></tr>
+    </tbody></table></div>
+  </div>
+
+  <div class="section-title">Data · Infra · DevSecOps · Engineering Quality agents</div>
+  <div class="grid2">
+    <div class="card"><div class="card-header"><span class="label">Data Architecture check_category</span></div>
+    <table><tbody>
+      <tr><td class="field-name">DATA_CLASSIFICATION</td><td class="desc">Classification and ownership documented</td></tr>
+      <tr><td class="field-name">DATA_LIFECYCLE</td><td class="desc">Retention, archival, deletion policy</td></tr>
+      <tr><td class="field-name">DATA_MODEL_DOCUMENTATION</td><td class="desc">ERDs, data dictionaries, lineage</td></tr>
+      <tr><td class="field-name">EOS_EOL_TRACKING</td><td class="desc">Data platform EoS/EoL flags</td></tr>
+      <tr><td class="field-name">DATA_GOVERNANCE</td><td class="desc">Ownership RnR, data product standards</td></tr>
+    </tbody></table></div>
+    <div class="card"><div class="card-header"><span class="label">Infra Architecture check_category</span></div>
+    <table><tbody>
+      <tr><td class="field-name">ENVIRONMENT_ADEQUACY</td><td class="desc">Dev/test/prod environment parity and readiness</td></tr>
+      <tr><td class="field-name">PLATFORM_LIFECYCLE</td><td class="desc">Platform upgrade path, EoS/EoL components</td></tr>
+      <tr><td class="field-name">CAPACITY_PLANNING</td><td class="desc">YoY growth, bandwidth, compute adequacy</td></tr>
+      <tr><td class="field-name">IAC_MATURITY</td><td class="desc">Infrastructure-as-Code completeness</td></tr>
+      <tr><td class="field-name">INFRA_SECURITY</td><td class="desc">Network segmentation, RBAC, Key Vault, VAPT</td></tr>
+      <tr><td class="field-name">OBSERVABILITY</td><td class="desc">Monitoring, logging, alerting, distributed tracing</td></tr>
+    </tbody></table></div>
+    <div class="card"><div class="card-header"><span class="label">DevSecOps check_category</span></div>
+    <table><tbody>
+      <tr><td class="field-name">CICD_PIPELINE_QUALITY</td><td class="desc">Pipeline completeness, quality gates</td></tr>
+      <tr><td class="field-name">BRANCHING_STRATEGY</td><td class="desc">Version control, branching model</td></tr>
+      <tr><td class="field-name">TWELVE_FACTOR_COMPLIANCE</td><td class="desc">12-Factor App compliance</td></tr>
+      <tr><td class="field-name">SAST_INTEGRATION</td><td class="desc">Static analysis tool in pipeline, threshold enforced</td></tr>
+      <tr><td class="field-name">DAST_RESULTS</td><td class="desc">Dynamic analysis results, findings closed</td></tr>
+      <tr><td class="field-name">SECRETS_CONFIG_MGMT</td><td class="desc">No secrets in code, config externalised</td></tr>
+      <tr><td class="field-name">DEPLOYMENT_STRATEGY</td><td class="desc">Blue/green, canary, rollback capability</td></tr>
+    </tbody></table></div>
+    <div class="card"><div class="card-header"><span class="label">Engineering Quality check_category</span></div>
+    <table><tbody>
+      <tr><td class="field-name">CODE_REVIEW_COVERAGE</td><td class="desc">% of PRs with mandatory code review</td></tr>
+      <tr><td class="field-name">TEST_COVERAGE</td><td class="desc">Unit, integration, E2E coverage %</td></tr>
+      <tr><td class="field-name">PERFORMANCE_TEST_RESULTS</td><td class="desc">Results age, load profile, P95/P99 latency</td></tr>
+      <tr><td class="field-name">DEFECT_METRICS</td><td class="desc">Open defect count by severity, MTTR</td></tr>
+      <tr><td class="field-name">CHANGE_MANAGEMENT</td><td class="desc">CAB process, change approval evidence</td></tr>
+      <tr><td class="field-name">SW_QUALITY_METRICS</td><td class="desc">Static analysis score, maintainability index</td></tr>
+    </tbody></table></div>
+  </div>
+
+  <div class="section-title">NFR Scorecard row (NFRAgent)</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td class="field-name">nfr_category</td><td><span class="type-pill">enum</span></td><td class="desc"><span class="enum-vals">SCALABILITY_PERFORMANCE · HA_RESILIENCE · SECURITY · DEVSECOPS_QUALITY · ENGINEERING_EXCELLENCE · DR</span></td></tr>
+        <tr><td class="field-name">rag_score</td><td><span class="type-pill">number 1–5</span></td><td class="desc">Score for this NFR category</td></tr>
+        <tr><td class="field-name">evidence_provided</td><td><span class="type-pill">string[]</span></td><td class="desc">List of specific evidence items submitted by SA for this category</td></tr>
+        <tr><td class="field-name">gaps</td><td><span class="type-pill">string[]</span></td><td class="desc">Specific gaps vs platform SLO baselines or industry benchmarks</td></tr>
+        <tr><td class="field-name">mitigating_condition</td><td><span class="type-pill">string</span></td><td class="desc">What must be done to close the gap. Empty if GREEN.</td></tr>
+        <tr><td class="field-name">slo_target</td><td><span class="type-pill">string</span></td><td class="desc">Platform SLO target for this category e.g. "P95 &lt; 3s, Four-9s HA"</td></tr>
+        <tr><td class="field-name">actual_evidenced</td><td><span class="type-pill">string</span></td><td class="desc">What the SA actually evidenced vs the SLO target</td></tr>
+        <tr><td class="field-name">is_mandatory_green</td><td><span class="type-pill">boolean</span></td><td class="desc">True for SECURITY and DR — any non-green score here is a blocker</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="prompt" class="panel">
+  <div class="note-box note-green">
+    Each domain agent constructs a single LLM API call using this prompt template. The LLM returns the entire <strong>DomainReviewPayload</strong> as a JSON object in one call using <code>response_format: json_object</code>. This avoids multi-turn overhead and makes retries simple.
+  </div>
+  <div class="section-title">System prompt structure</div>
+  <div class="json-block"><span class="jc">// System prompt sent by every domain agent (domain-specific values injected at {}</span>
+<span class="jk">SYSTEM:</span>
+You are the {DOMAIN_LABEL} specialist agent in the Pre-ARB AI Agent pipeline.
+Your role is to validate the Solution Architect's submitted artifacts against
+enterprise architecture standards and produce a structured JSON review payload.
+
+<span class="jk">RULES:</span>
+1. Respond ONLY with a valid JSON object matching DomainReviewPayload schema.
+   No preamble, no markdown, no explanation outside the JSON.
+2. Every finding must reference a specific SA artifact AND a specific KB document.
+   Never generate findings from general knowledge alone.
+3. Every Blocker must have severity = "BLOCKER" and rag_score = 1.
+4. Every AMBER or RED finding must have at least one corresponding Action.
+5. Every significant decision must have a corresponding ADR.
+6. Waivers (ADR type = WAIVER) must include a proposed waiver_expiry_date.
+7. The domain rag_score must equal min(all finding rag_scores).
+   You cannot score AMBER if any finding is RED.
+8. If evidence is absent for a mandatory check, rag_score = 1 (RED). Never skip.
+9. Do not invent evidence. If you cannot find it in the provided artifacts, flag it.
+10. Security domain: any rag_score &lt; 4 must generate a Blocker record.
+
+<span class="jk">SCORING RULES:</span>
+5 = Fully compliant, all evidence present, no gaps
+4 = Compliant with minor tracked actions only
+3 = Partially compliant, gaps with mitigation plan
+2 = Significant gaps, mandatory actions before go-live
+1 = Fails mandatory standard or evidence absent (RED / BLOCKER)</div>
+
+  <div class="section-title">User prompt structure</div>
+  <div class="json-block"><span class="jc">// User message — constructed by agent wrapper code</span>
+<span class="jk">USER:</span>
+<span class="js">== REVIEW SESSION ==</span>
+session_id: {session_id}
+solution_name: {solution_name}
+domain_under_review: {DOMAIN_CODE}
+review_date: {ISO8601_DATE}
+
+<span class="js">== KNOWLEDGE BASE CONTEXT (retrieved for this domain) ==</span>
+{RAG_CONTEXT_CHUNKS}
+<span class="jc">// Injected by RAG Agent — max 8000 tokens of domain-scoped KB content</span>
+<span class="jc">// Format: [KB-DOC-ID | version | effective_date] followed by content chunk</span>
+
+<span class="js">== SA SUBMITTED ARTIFACTS ==</span>
+{PARSED_ARTIFACT_CHUNKS}
+<span class="jc">// Injected by Intake &amp; Document Processing Agent</span>
+<span class="jc">// Parsed + chunked: HLD text, diagram OCR output, Integration Catalogue rows,</span>
+<span class="jc">// SBOM entries, ADRs, NFR evidence pack, VAPT reports etc.</span>
+<span class="jc">// Only {DOMAIN_CODE}-relevant chunks are passed to this agent</span>
+
+<span class="js">== ID SEED ==</span>
+finding_id_start: {DOMAIN_CODE}-F01
+blocker_id_start: {DOMAIN_CODE}-BLK-01
+recommendation_id_start: {DOMAIN_CODE}-REC-01
+action_id_start: {DOMAIN_CODE}-ACT-01
+adr_id_start: ADR-{DOMAIN_CODE}-01
+<span class="jc">// Agent uses these as starting IDs for sequential numbering</span>
+
+<span class="js">== MANDATORY CHECK CATEGORIES FOR THIS DOMAIN ==</span>
+{DOMAIN_CHECK_CATEGORY_ENUM_VALUES}
+<span class="jc">// List of valid check_category values for this domain (from Domain Fields tab)</span>
+<span class="jc">// LLM must produce at least one Finding per mandatory category</span>
+
+<span class="js">== OUTPUT SCHEMA ==</span>
+Return a JSON object with this exact top-level structure:
+{
+  "domain": "{DOMAIN_CODE}",
+  "session_id": "{session_id}",
+  "summary": { <span class="jc">/* DomainSummary object */</span> },
+  "blockers": [ <span class="jc">/* Blocker[] — empty array if none */</span> ],
+  "recommendations": [ <span class="jc">/* Recommendation[] — min 1 */</span> ],
+  "findings": [ <span class="jc">/* Finding[] — min 1 per mandatory check_category */</span> ],
+  "actions": [ <span class="jc">/* Action[] — required for every BLOCKER or AMBER finding */</span> ],
+  "adrs": [ <span class="jc">/* ADR[] — required for every significant decision or deviation */</span> ]
+}</div>
+
+  <div class="section-title">Orchestrator aggregation logic</div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="flow-step"><div class="step-num">1</div><div class="step-body"><div class="step-title">Await all domain agent results</div><div class="step-desc">Orchestrator fans out 9 parallel LLM calls. Waits for all to complete (or timeout after SLA). Marks failed agents with status AGENT_ERROR and logs for retry.</div></div></div>
+    <div class="flow-step"><div class="step-num">2</div><div class="step-body"><div class="step-title">Flatten blockers and actions</div><div class="step-desc">Iterates domain_reviews[], collects all Blocker[] and Action[] into root consolidated_blockers[] and consolidated_actions[]. Assigns global sequential IDs cross-domain.</div></div></div>
+    <div class="flow-step"><div class="step-num">3</div><div class="step-body"><div class="step-title">Compute aggregate_rag_score</div><div class="step-desc">Rule: min(all domain summary rag_scores). Override: if any is_security_or_dr blocker exists → aggregate forced to RED (1) regardless of other scores.</div></div></div>
+    <div class="flow-step"><div class="step-num">4</div><div class="step-body"><div class="step-title">Determine recommended_decision</div><div class="step-desc">Score 5 → APPROVE. Score 4 → APPROVE (minor actions). Score 3–2 → APPROVE_WITH_CONDITIONS. Score 1 with security/DR blocker → REJECT. Score 1 other → DEFER.</div></div></div>
+    <div class="flow-step"><div class="step-num">5</div><div class="step-body"><div class="step-title">Generate decision_rationale (LLM call)</div><div class="step-desc">Orchestrator makes one additional LLM call with the aggregated scores and consolidated blockers to write the 2–4 sentence decision rationale. This is the only orchestrator LLM call.</div></div></div>
+    <div class="flow-step"><div class="step-num">6</div><div class="step-body"><div class="step-title">Trigger HITL Gate 2</div><div class="step-desc">Sets status = EA_REVIEW, writes ReviewSession to store, sends EA notification via ServiceNow/Teams with dossier link. SLA timer starts for EA review (1 business day).</div></div></div>
+  </div>
+</div>
+
+<script>
+function showTab(id){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>

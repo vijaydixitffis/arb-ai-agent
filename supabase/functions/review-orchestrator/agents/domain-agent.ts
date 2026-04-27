@@ -1,7 +1,7 @@
 export interface Finding {
   domain: string
   principle_id: string
-  severity: 'critical' | 'major' | 'minor'
+  severity: 'blocker' | 'high' | 'medium' | 'low' | 'info'
   finding: string
   recommendation: string
 }
@@ -59,16 +59,17 @@ export abstract class DomainAgent {
   protected calculateScore(findings: Finding[]): number {
     if (findings.length === 0) return 5
     
-    const criticalCount = findings.filter(f => f.severity === 'critical').length
-    const majorCount = findings.filter(f => f.severity === 'major').length
-    const minorCount = findings.filter(f => f.severity === 'minor').length
+    const blockerCount = findings.filter(f => f.severity === 'blocker').length
+    const highCount = findings.filter(f => f.severity === 'high').length
+    const mediumCount = findings.filter(f => f.severity === 'medium').length
+    const lowCount = findings.filter(f => f.severity === 'low').length
     
     // Scoring algorithm
-    if (criticalCount > 0) return 1
-    if (majorCount >= 3) return 2
-    if (majorCount >= 1) return 3
-    if (minorCount >= 5) return 3
-    if (minorCount >= 2) return 4
+    if (blockerCount > 0) return 1
+    if (highCount >= 3) return 2
+    if (highCount >= 1) return 3
+    if (mediumCount >= 5) return 3
+    if (mediumCount >= 2) return 4
     
     return 5
   }

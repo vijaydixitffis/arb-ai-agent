@@ -13,7 +13,7 @@ export class BusinessDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'B-01',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No documented business requirements',
         recommendation: 'Create and reference Business Requirements Document (BRD)'
       })
@@ -24,7 +24,7 @@ export class BusinessDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'B-02',
-        severity: 'major',
+        severity: 'high',
         finding: 'No stakeholder analysis documented',
         recommendation: 'Identify and document all stakeholders, business owners, and their roles'
       })
@@ -35,7 +35,7 @@ export class BusinessDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'B-03',
-        severity: 'major',
+        severity: 'high',
         finding: 'No business continuity plan documented',
         recommendation: 'Document business continuity and disaster recovery requirements'
       })

@@ -13,7 +13,7 @@ export class GeneralDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'G-01',
-        severity: 'major',
+        severity: 'high',
         finding: 'No explicit customer focus or user experience considerations documented',
         recommendation: 'Add customer problem statement, success metrics, and UX considerations'
       })
@@ -24,7 +24,7 @@ export class GeneralDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'G-02',
-        severity: 'minor',
+        severity: 'medium',
         finding: 'No phased delivery approach documented',
         recommendation: 'Document phased delivery plan with intermediate milestones'
       })
@@ -35,7 +35,7 @@ export class GeneralDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'G-03',
-        severity: 'major',
+        severity: 'high',
         finding: 'No consideration of enterprise architecture landscape',
         recommendation: 'Review against enterprise capability map and integration catalogue'
       })
@@ -46,7 +46,7 @@ export class GeneralDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'G-04',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No reliability targets (HA/DR) defined',
         recommendation: 'Define HA targets, RPO/RTO objectives, and failure mode analysis'
       })

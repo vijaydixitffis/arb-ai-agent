@@ -1,10 +1,20 @@
 import { DomainAgent, DomainResult, Finding } from './domain-agent.ts'
 import { callLLM } from '../utils/llm.ts'
+import {
+  buildDomainContext,
+  buildSolutionContextBlock,
+  buildArtefactBlock,
+  buildNfrCriteriaBlock,
+  getKnowledgeBaseContent,
+  getKbCategoriesForAgent
+} from './context-builder.ts'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 export interface ReviewInput {
   review: any
+  reportJson: any
   artifactText: string
-  knowledgeBase: string
+  supabase: SupabaseClient
   domainAgents: Record<string, DomainAgent>
   scopeTags: string[]
 }
@@ -33,29 +43,105 @@ export interface ReviewResult {
 
 export class OrchestratorAgent {
   async validateReview(input: ReviewInput): Promise<ReviewResult> {
-    const { review, artifactText, knowledgeBase, domainAgents, scopeTags } = input
+    const { review, reportJson, artifactText, supabase, scopeTags } = input
     
     console.log(`Orchestrator: Starting validation for review ${review.id}`)
     console.log(`Scope tags: ${scopeTags.join(', ')}`)
     
-    // Run domain validation for each scope tag
+    // Map scope tags to agent domains
+    const agentDomainMap: Record<string, string[]> = {
+      'general': ['general'],
+      'business': ['business'],
+      'application': ['application', 'software'],
+      'integration': ['integration', 'api'],
+      'data': ['data'],
+      'infrastructure': ['infra', 'security'],
+      'devsecops': ['devsecops', 'engg_quality'],
+      'nfr': ['nfr', 'security']
+    }
+    
+    // Get all agent domains to process
+    const allAgentDomains = scopeTags.flatMap(tag => agentDomainMap[tag] || [tag])
+    const uniqueDomains = [...new Set(allAgentDomains)]
+    
+    console.log(`Processing domains: ${uniqueDomains.join(', ')}`)
+    
+    // Process each domain with per-domain LLM call
     const domainResults: DomainResult[] = []
-    for (const tag of scopeTags) {
-      const agent = domainAgents[tag]
-      if (agent) {
-        console.log(`Running ${tag} domain validation...`)
-        const result = agent.validate(artifactText, knowledgeBase)
-        domainResults.push(result)
+    const allFindings: Finding[] = []
+    let totalTokensUsed = 0
+    
+    for (const agentDomain of uniqueDomains) {
+      console.log(`\n=== Processing domain: ${agentDomain} ===`)
+      
+      // Step 1: Load domain checklist + evidence from report_json
+      const checklistContext = await buildDomainContext(supabase, reportJson, agentDomain)
+      
+      // Step 2: Load artifact parsed text (filtered by domain)
+      const artefactContext = buildArtefactBlock(reportJson, agentDomain)
+      
+      // Step 3 & 4: Already done in buildDomainContext (enrich + group by category)
+      
+      // Step 5: Inject RAG knowledge-base context
+      const kbCategories = getKbCategoriesForAgent(agentDomain)
+      const kbContext = await getKnowledgeBaseContent(supabase, kbCategories)
+      
+      // Step 6: Assemble final prompt and call LLM
+      const systemPrompt = this.buildDomainSystemPrompt(agentDomain, kbContext)
+      const userPrompt = this.buildDomainUserPrompt(
+        review,
+        reportJson,
+        checklistContext,
+        artefactContext,
+        agentDomain
+      )
+      
+      // Add NFR criteria for NFR domain
+      let nfrContext = ''
+      if (agentDomain === 'nfr') {
+        nfrContext = buildNfrCriteriaBlock(reportJson)
       }
+      
+      const finalUserPrompt = userPrompt + '\n\n' + nfrContext
+      
+      console.log(`Calling LLM for domain: ${agentDomain}`)
+      const llmResponse = await callLLM({
+        systemPrompt,
+        userPrompt: finalUserPrompt,
+        model: review.llm_model || 'gpt-4o'
+      })
+      
+      totalTokensUsed += llmResponse.tokensUsed
+      
+      // Parse domain-specific LLM response
+      const domainReport = JSON.parse(llmResponse.content)
+      
+      // Extract findings from domain response
+      const domainFindings: Finding[] = (domainReport.findings || []).map((f: any) => ({
+        domain: agentDomain,
+        principle_id: f.principle_id || '',
+        severity: f.severity || 'minor',
+        finding: f.finding || '',
+        recommendation: f.recommendation || ''
+      }))
+      
+      allFindings.push(...domainFindings)
+      
+      // Calculate domain score from findings
+      const domainScore = this.calculateDomainScore(domainFindings)
+      domainResults.push({
+        domain: agentDomain,
+        score: domainScore,
+        findings: domainFindings
+      })
+      
+      console.log(`Domain ${agentDomain}: score=${domainScore}, findings=${domainFindings.length}`)
     }
     
     // Aggregate results
     const domainScores: Record<string, number> = {}
-    const allFindings: Finding[] = []
-    
     for (const result of domainResults) {
       domainScores[result.domain] = result.score
-      allFindings.push(...result.findings)
     }
     
     // Calculate aggregate score
@@ -64,80 +150,103 @@ export class OrchestratorAgent {
       ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
       : 3
     
+    console.log(`\n=== Aggregate Results ===`)
     console.log(`Aggregate score: ${aggregateScore}`)
     console.log(`Total findings: ${allFindings.length}`)
-    
-    // Assemble LLM prompt
-    const systemPrompt = this.buildSystemPrompt(knowledgeBase, scopeTags)
-    const userPrompt = this.buildUserPrompt(review, artifactText, domainResults)
-    
-    // Call LLM
-    const llmResponse = await callLLM({
-      systemPrompt,
-      userPrompt,
-      model: review.llm_model || 'gpt-4o'
-    })
-    
-    // Parse LLM response
-    const llmReport = JSON.parse(llmResponse.content)
-    
-    // Merge domain agent findings with LLM findings
-    const mergedFindings = this.mergeFindings(allFindings, llmReport.findings || [])
+    console.log(`Total tokens used: ${totalTokensUsed}`)
     
     // Determine decision
-    const decision = this.determineDecision(aggregateScore, mergedFindings, llmReport)
+    const decision = this.determineDecision(aggregateScore, allFindings, domainScores)
+    
+    // Build final report
+    const fullReport = {
+      decision,
+      aggregate_score: aggregateScore,
+      domain_scores: domainScores,
+      findings: allFindings,
+      solution_context: buildSolutionContextBlock(reportJson)
+    }
     
     return {
       decision,
       aggregateScore,
       domainScores,
-      findings: mergedFindings,
-      adrs: llmReport.adrs || [],
-      actions: llmReport.actions || [],
-      fullReport: llmReport,
-      tokensUsed: llmResponse.tokensUsed,
-      rawResponse: llmResponse.content
+      findings: allFindings,
+      adrs: [], // ADRs would be extracted from LLM responses if needed
+      actions: [], // Actions would be extracted from LLM responses if needed
+      fullReport,
+      tokensUsed: totalTokensUsed,
+      rawResponse: JSON.stringify(fullReport)
     }
   }
   
-  private buildSystemPrompt(knowledgeBase: string, scopeTags: string[]): string {
-    return `You are an Enterprise Architecture Review Board AI agent.
+  private buildDomainSystemPrompt(agentDomain: string, kbContext: string): string {
+    return `You are an Enterprise Architecture Review Board AI agent specializing in the ${agentDomain} domain.
 
-## Knowledge base — EA principles and standards
-${knowledgeBase}
+## KNOWLEDGE BASE CONTEXT
+${kbContext}
 
-## Review rubric
-For each domain (${scopeTags.join(', ')}):
-- Score 1-5 (1=critical gap, 5=fully compliant)
-- Security and DR must score ≥ 4 for approval
-- Cite the specific principle_id from the knowledge base for every finding
+## YOUR TASK
+Review the SA checklist answers and evidence provided below. Generate findings grouped by check_category.
 
-## Output schema (respond ONLY in this JSON, no prose)
+## OUTPUT SCHEMA (respond ONLY in this JSON, no prose)
 {
-  "decision": "approve|approve_with_conditions|defer|reject",
-  "aggregate_score": 1-5,
-  "domain_scores": { "app": n, "integration": n, "data": n, "security": n, "infra": n, "devsecops": n },
-  "findings": [{ "domain": "", "principle_id": "", "severity": "critical|major|minor", "finding": "", "recommendation": "" }],
-  "adrs": [{ "id": "", "decision": "", "rationale": "", "owner": "", "target_date": "" }],
-  "actions": [{ "action": "", "owner_role": "", "due_days": n }]
-}`
+  "findings": [
+    {
+      "check_category": "CATEGORY_NAME",
+      "severity": "blocker|high|medium|low|info",
+      "finding": "Clear description of the issue",
+      "recommendation": "Specific actionable recommendation",
+      "principle_id": "Reference to relevant principle if applicable"
+    }
+  ]
+}
+
+## SEVERITY GUIDELINES
+- blocker: mandatory_green questions with non_compliant or not_answered
+- high: important questions with non_compliant and no evidence
+- medium: important questions with non_compliant/partial and weak evidence
+- low: advisory questions with issues
+- info: minor observations or suggestions
+
+## BLANK EVIDENCE HANDLING
+If evidence is blank for non_compliant or partial answers, explicitly cite "absence of evidence" in the finding.`
   }
   
-  private buildUserPrompt(review: any, artifactText: string, domainResults: DomainResult[]): string {
-    const domainSummary = domainResults
-      .map(r => `- ${r.domain}: Score ${r.score}, ${r.findings.length} findings`)
-      .join('\n')
+  private buildDomainUserPrompt(
+    review: any,
+    reportJson: any,
+    checklistContext: string,
+    artefactContext: string,
+    agentDomain: string
+  ): string {
+    const solutionContext = buildSolutionContextBlock(reportJson)
     
-    return `Review the following solution architecture document against the EA principles and standards provided.
+    return `${solutionContext}
 
-Solution Name: ${review.solution_name}
-Declared Scope: ${review.scope_tags.join(', ')}
+${checklistContext}
 
-## Domain Agent Analysis
-${domainSummary}
-
-## Solution Artifact Content
-${artifactText}`
+${artefactContext}`
+  }
+  
+  private calculateDomainScore(findings: Finding[]): number {
+    if (findings.length === 0) return 5
+    
+    const blockerCount = findings.filter(f => f.severity === 'blocker').length
+    const highCount = findings.filter(f => f.severity === 'high').length
+    const mediumCount = findings.filter(f => f.severity === 'medium').length
+    const lowCount = findings.filter(f => f.severity === 'low').length
+    
+    // Scoring algorithm based on severity
+    if (blockerCount > 0) return 1
+    if (highCount >= 3) return 1
+    if (highCount >= 1) return 2
+    if (mediumCount >= 5) return 2
+    if (mediumCount >= 3) return 3
+    if (mediumCount >= 1) return 4
+    if (lowCount >= 5) return 4
+    
+    return 5
   }
   
   private mergeFindings(agentFindings: Finding[], llmFindings: Finding[]): Finding[] {
@@ -164,29 +273,24 @@ ${artifactText}`
   private determineDecision(
     aggregateScore: number,
     findings: Finding[],
-    llmReport: any
+    domainScores: Record<string, number>
   ): 'approve' | 'approve_with_conditions' | 'defer' | 'reject' {
-    // Use LLM decision if provided, otherwise calculate based on scores
-    if (llmReport.decision) {
-      return llmReport.decision
-    }
+    const blockerCount = findings.filter(f => f.severity === 'blocker').length
+    const highCount = findings.filter(f => f.severity === 'high').length
     
-    const criticalCount = findings.filter(f => f.severity === 'critical').length
-    const majorCount = findings.filter(f => f.severity === 'major').length
+    // Check security and NFR scores (must be >= 4)
+    const securityScore = domainScores?.security || 0
+    const nfrScore = domainScores?.nfr || 0
     
-    // Check security and DR scores (must be >= 4)
-    const securityScore = llmReport.domain_scores?.security || 0
-    const nfrScore = llmReport.domain_scores?.nfr || 0
-    
-    if (criticalCount > 0 || securityScore < 4 || nfrScore < 4) {
+    if (blockerCount > 0 || securityScore < 4 || nfrScore < 4) {
       return 'reject'
     }
     
-    if (majorCount >= 3) {
+    if (highCount >= 3) {
       return 'defer'
     }
     
-    if (majorCount >= 1 || aggregateScore < 4) {
+    if (highCount >= 1 || aggregateScore < 4) {
       return 'approve_with_conditions'
     }
     

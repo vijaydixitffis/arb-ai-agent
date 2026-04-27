@@ -13,7 +13,7 @@ export class InfrastructureDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'I-01',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No infrastructure architecture documented',
         recommendation: 'Provide infrastructure architecture diagram and network topology'
       })
@@ -24,7 +24,7 @@ export class InfrastructureDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'I-02',
-        severity: 'major',
+        severity: 'high',
         finding: 'Cloud platform strategy not clearly defined',
         recommendation: 'Document cloud platform choice, regions, and deployment strategy'
       })
@@ -35,7 +35,7 @@ export class InfrastructureDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'I-03',
-        severity: 'major',
+        severity: 'high',
         finding: 'No capacity planning documented',
         recommendation: 'Define capacity requirements, scaling strategy, and resource limits'
       })

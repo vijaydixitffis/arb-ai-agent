@@ -71,26 +71,46 @@ serve(async (req) => {
     console.log(`Review ${reviewId} status updated to in_review`)
 
     // ============================================================================
-    // STEP 2: Load MD files based on scope tags
+    // STEP 2: Load knowledge base content based on scope tags
     // ============================================================================
-    const { data: mdFiles } = await supabase
-      .from('md_files')
-      .select('*')
-      .contains('domain_tags', review.scope_tags)
-      .eq('is_active', true)
-      .order('priority', { ascending: true })
-
-    if (!mdFiles || mdFiles.length === 0) {
-      throw new Error('No MD files found for the given scope')
+    // Map scope tags to knowledge base categories and principles
+    const categoryMap: Record<string, string[]> = {
+      'general': ['ea_principles', 'ea_standards'],
+      'business': ['ea_principles', 'ea_standards'],
+      'application': ['ea_principles', 'ea_standards'],
+      'software': ['ea_principles', 'ea_standards'],
+      'integration': ['integration_principles', 'ea_standards'],
+      'api': ['integration_principles', 'ea_standards'],
+      'security': ['ea_principles', 'ea_standards'],
+      'data': ['ea_principles', 'ea_standards'],
+      'infra': ['ea_principles', 'ea_standards'],
+      'devsecops': ['ea_principles', 'ea_standards'],
+      'engg_quality': ['ea_principles', 'ea_standards'],
+      'nfr': ['ea_principles', 'ea_standards']
     }
 
-    const totalTokens = mdFiles.reduce((sum, file) => sum + (file.token_estimate || 0), 0)
-    console.log(`Loaded ${mdFiles.length} MD files, estimated ${totalTokens} tokens`)
+    // Get all relevant categories for the scope tags
+    const relevantCategories = review.scope_tags.flatMap(tag => categoryMap[tag] || [])
+    const uniqueCategories = [...new Set(relevantCategories)]
 
-    // Concatenate MD content into system prompt
-    const knowledgeBase = mdFiles
-      .map(file => `## ${file.filename}\n\n${file.content}`)
-      .join('\n\n---\n\n')
+    // Fetch knowledge base content
+    const { data: knowledgeBaseData } = await supabase
+      .from('knowledge_base')
+      .select('*')
+      .in('category', uniqueCategories)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true })
+
+    if (!knowledgeBaseData || knowledgeBaseData.length === 0) {
+      console.warn('No knowledge base content found for the given scope')
+    }
+
+    console.log(`Loaded ${knowledgeBaseData?.length || 0} knowledge base entries`)
+
+    // Concatenate knowledge base content into system prompt
+    const knowledgeBase = knowledgeBaseData
+      ?.map(entry => `## ${entry.title}\n\n${entry.content}`)
+      .join('\n\n---\n\n') || ''
 
     // ============================================================================
     // STEP 3: Parse artifact from Storage
@@ -134,8 +154,9 @@ serve(async (req) => {
 
     const reviewResult = await orchestrator.validateReview({
       review,
+      reportJson: review.report_json,
       artifactText,
-      knowledgeBase,
+      supabase,
       domainAgents,
       scopeTags: review.scope_tags
     })

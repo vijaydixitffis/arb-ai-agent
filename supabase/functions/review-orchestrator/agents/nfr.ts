@@ -13,7 +13,7 @@ export class NFRAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'NFR-01',
-        severity: 'major',
+        severity: 'high',
         finding: 'No performance requirements documented',
         recommendation: 'Define performance targets (latency, throughput, response time)'
       })
@@ -24,7 +24,7 @@ export class NFRAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'NFR-02',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No availability targets documented',
         recommendation: 'Define availability SLA (e.g., 99.9%, 99.99%) and failover mechanisms'
       })
@@ -35,7 +35,7 @@ export class NFRAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'NFR-03',
-        severity: 'major',
+        severity: 'high',
         finding: 'No scalability requirements documented',
         recommendation: 'Define horizontal and vertical scaling strategies'
       })
@@ -46,7 +46,7 @@ export class NFRAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'NFR-04',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No disaster recovery objectives documented',
         recommendation: 'Define RPO, RTO, and disaster recovery testing procedures'
       })

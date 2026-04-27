@@ -13,7 +13,7 @@ export class ApplicationDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'A-01',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No application architecture diagram documented',
         recommendation: 'Provide High Level Design (HLD) and application architecture diagrams'
       })
@@ -24,7 +24,7 @@ export class ApplicationDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'A-02',
-        severity: 'major',
+        severity: 'high',
         finding: 'Technology stack not clearly defined',
         recommendation: 'Document complete technology stack with versions and rationale'
       })
@@ -35,7 +35,7 @@ export class ApplicationDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'A-03',
-        severity: 'minor',
+        severity: 'medium',
         finding: 'No Architecture Decision Records documented',
         recommendation: 'Create ADRs for key architectural decisions'
       })

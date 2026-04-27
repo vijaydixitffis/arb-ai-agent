@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reviews.report_json",
+  "title": "ARB Review Report JSON",
+  "description": "report_json stored on the reviews table, populated step-by-step by the frontend submission wizard",
+  "type": "object",
+  "required": ["form_data"],
+  "properties": {
+
+    "form_data": {
+      "type": "object",
+      "description": "Complete form payload serialised on every Next / Save Draft action",
+      "required": [
+        "project_name",
+        "problem_statement",
+        "stakeholders",
+        "business_drivers",
+        "domain_data",
+        "nfr_criteria"
+      ],
+      "properties": {
+
+        "reviewId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Populated after the first draft save; empty string on the very first step"
+        },
+        "solution_name": {
+          "type": "string",
+          "description": "Mirrors reviews.solution_name; may be the same as project_name"
+        },
+        "scope_tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Domain slugs and artefact-derived tags extracted by reviewService.extractScopeTags()"
+        },
+        "project_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "problem_statement": {
+          "type": "string",
+          "description": "Free-text description of the problem this solution addresses"
+        },
+        "stakeholders": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "One entry per line as entered in the Stakeholders textarea"
+        },
+        "business_drivers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "One entry per line as entered in the Business Drivers textarea"
+        },
+        "growth_plans": {
+          "type": "string",
+          "description": "Free-text scalability / growth plans (optional)"
+        },
+
+        "domain_data": {
+          "type": "object",
+          "description": "One key per domain slug; populated incrementally as the user progresses through domain tabs",
+          "properties": {
+
+            "general": { "$ref": "#/$defs/domainData/general" },
+            "business": { "$ref": "#/$defs/domainData/business" },
+            "application": { "$ref": "#/$defs/domainData/application" },
+            "integration": { "$ref": "#/$defs/domainData/integration" },
+            "data": { "$ref": "#/$defs/domainData/data" },
+            "infrastructure": { "$ref": "#/$defs/domainData/infrastructure" },
+            "devsecops": { "$ref": "#/$defs/domainData/devsecops" },
+            "nfr": { "$ref": "#/$defs/domainData/nfr" }
+          },
+          "additionalProperties": false
+        },
+
+        "nfr_criteria": {
+          "type": "array",
+          "description": "Quantitative NFR rows filled in on the NFR tab",
+          "items": {
+            "type": "object",
+            "required": ["category", "criteria", "target_value", "actual_value", "score"],
+            "properties": {
+              "category": {
+                "type": "string",
+                "examples": ["Performance", "Scalability", "Availability", "Security"]
+              },
+              "criteria": {
+                "type": "string",
+                "examples": ["Response Time", "Concurrent Users", "Uptime"]
+              },
+              "target_value": {
+                "type": "string",
+                "examples": ["< 200ms", "100,000", "99.9%"]
+              },
+              "actual_value": {
+                "type": "string",
+                "examples": ["150ms", "80,000", "Not measured"]
+              },
+              "score": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "description": "Numeric compliance score (0 = not met, 10 = fully met)"
+              },
+              "evidence": {
+                "type": "string",
+                "description": "Optional supporting notes or link to test results"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+
+      },
+      "additionalProperties": false
+    }
+
+  },
+
+  "$defs": {
+
+    "complianceAnswer": {
+      "type": "string",
+      "enum": ["compliant", "non_compliant", "partial", "na"],
+      "description": "Slider answer stored by the checklist dialog"
+    },
+
+    "domainBlock": {
+      "type": "object",
+      "required": ["checklist", "evidence"],
+      "properties": {
+        "checklist": {
+          "type": "object",
+          "description": "question_code → compliance answer",
+          "additionalProperties": { "$ref": "#/$defs/complianceAnswer" }
+        },
+        "evidence": {
+          "type": "object",
+          "description": "question_code → free-text evidence / notes",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "domainData": {
+
+      "general": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 1 domain — Generic metrics and cross-cutting concerns",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "gen-doc-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Adherence to architecture principles?" },
+              "gen-doc-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Adherence to patterns, standards, policies?" },
+              "gen-doc-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Level of documentation adequate?" },
+              "gen-eco-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Total cost of ownership calculated?" },
+              "gen-eco-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Budget alignment verified?" },
+              "gen-eco-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Opportunities for cost optimization identified?" },
+              "gen-euv-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Top 10 end-user concerns identified?" },
+              "gen-euv-2":  { "$ref": "#/$defs/complianceAnswer", "description": "End-user wish list documented?" },
+              "gen-euv-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Support tickets and incidents analyzed?" },
+              "gen-proc-1": { "$ref": "#/$defs/complianceAnswer", "description": "Adherence to PtX process?" },
+              "gen-proc-2": { "$ref": "#/$defs/complianceAnswer", "description": "RAID logs and decision logs maintained?" },
+              "gen-proc-3": { "$ref": "#/$defs/complianceAnswer", "description": "Roadmap alignment verified?" },
+              "gen-proc-4": { "$ref": "#/$defs/complianceAnswer", "description": "Consolidation/Federation/Standardization considered?" },
+              "gen-strat-1":{ "$ref": "#/$defs/complianceAnswer", "description": "Change in business priority assessed?" },
+              "gen-strat-2":{ "$ref": "#/$defs/complianceAnswer", "description": "Change in business model considered?" },
+              "gen-strat-3":{ "$ref": "#/$defs/complianceAnswer", "description": "Change in target operating model evaluated?" },
+              "gen-strat-4":{ "$ref": "#/$defs/complianceAnswer", "description": "Alignment to target architecture/roadmap verified?" }
+            }
+          }
+        }
+      },
+
+      "business": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 2 domain — Business capabilities and processes",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "bus-nfr-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Security — password/expiry/reset/lock specs defined?" },
+              "bus-nfr-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Performance & scalability business metrics defined?" },
+              "bus-nfr-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Business continuity plan established?" },
+              "bus-nfr-4":  { "$ref": "#/$defs/complianceAnswer", "description": "Analytics/Monetization considered?" },
+              "bus-oth-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Operation time (24/7, weekdays etc.) defined?" },
+              "bus-oth-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Business change management plan established?" },
+              "bus-oth-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Target operating model defined?" },
+              "bus-oth-4":  { "$ref": "#/$defs/complianceAnswer", "description": "Continuity plan documented?" },
+              "bus-oth-5":  { "$ref": "#/$defs/complianceAnswer", "description": "Reporting and monetization strategy defined?" },
+              "bus-what-1": { "$ref": "#/$defs/complianceAnswer", "description": "Business use cases & capabilities impacted documented?" },
+              "bus-what-2": { "$ref": "#/$defs/complianceAnswer", "description": "Growth/change plans defined?" },
+              "bus-what-3": { "$ref": "#/$defs/complianceAnswer", "description": "Domain model established?" },
+              "bus-what-4": { "$ref": "#/$defs/complianceAnswer", "description": "Service/Contract/Functions documented?" },
+              "bus-who-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Actors, users, systems and entities identified?" },
+              "bus-who-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Roles and user groups documented?" },
+              "bus-who-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Multi-timezone considered?" },
+              "bus-who-4":  { "$ref": "#/$defs/complianceAnswer", "description": "Multilingual support considered?" },
+              "bus-who-5":  { "$ref": "#/$defs/complianceAnswer", "description": "Multi-currency support considered?" },
+              "bus-why-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Justification for this capability/app/service?" },
+              "bus-why-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Entry-exit criteria for business functions defined?" },
+              "bus-why-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Business case documented?" },
+              "bus-why-4":  { "$ref": "#/$defs/complianceAnswer", "description": "Product lifecycle and roadmap alignment verified?" }
+            }
+          }
+        }
+      },
+
+      "application": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 3 domain — Tech stack and patterns",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "app-meta-1": { "$ref": "#/$defs/complianceAnswer", "description": "COTS/Bespoke/Legacy classification documented?" },
+              "app-meta-2": { "$ref": "#/$defs/complianceAnswer", "description": "Monolith/Microservices architecture defined?" },
+              "app-meta-3": { "$ref": "#/$defs/complianceAnswer", "description": "Technology stack documented?" },
+              "app-meta-4": { "$ref": "#/$defs/complianceAnswer", "description": "Technology debt identified?" },
+              "app-meta-5": { "$ref": "#/$defs/complianceAnswer", "description": "SW/platform upgrade plan documented?" },
+              "app-meta-6": { "$ref": "#/$defs/complianceAnswer", "description": "Dependent library EOS tracked?" },
+              "app-meta-7": { "$ref": "#/$defs/complianceAnswer", "description": "EoL/EoS/License expiry documented?" },
+              "app-oth-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Usability metrics defined?" },
+              "app-oth-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Audits/Logging implemented?" },
+              "app-oth-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Monitoring/Alerts configured?" },
+              "app-oth-4":  { "$ref": "#/$defs/complianceAnswer", "description": "TCO 3yr/5yr calculated?" },
+              "app-oth-5":  { "$ref": "#/$defs/complianceAnswer", "description": "Integrations QoS defined?" },
+              "app-oth-6":  { "$ref": "#/$defs/complianceAnswer", "description": "Distributed cache required?" },
+              "app-oth-7":  { "$ref": "#/$defs/complianceAnswer", "description": "Notifications/Events implemented?" },
+              "app-oth-8":  { "$ref": "#/$defs/complianceAnswer", "description": "Scheduled jobs/batches documented?" },
+              "app-soft-1": { "$ref": "#/$defs/complianceAnswer", "description": "Technology choices align to standards; SBOM?" },
+              "app-soft-2": { "$ref": "#/$defs/complianceAnswer", "description": "Versioning and backward compatibility; ADRs?" },
+              "app-soft-3": { "$ref": "#/$defs/complianceAnswer", "description": "Resilience patterns: timeouts, retries, circuit breakers?" },
+              "app-soft-4": { "$ref": "#/$defs/complianceAnswer", "description": "Documentation: diagrams, ADRs, runbooks current?" }
+            }
+          }
+        }
+      },
+
+      "integration": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 4 domain — APIs and integration catalogue",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "int-cat-1":   { "$ref": "#/$defs/complianceAnswer", "description": "Interface Catalog documented (SR, Provider, Consumer)?" },
+              "int-cat-2":   { "$ref": "#/$defs/complianceAnswer", "description": "Pattern/Type/Method defined (API/File/MSG/Event)?" },
+              "int-cat-3":   { "$ref": "#/$defs/complianceAnswer", "description": "Interaction style specified (Async/Batch/Sync/Real-time)?" },
+              "int-cat-4":   { "$ref": "#/$defs/complianceAnswer", "description": "Frequency documented?" },
+              "int-cat-5":   { "$ref": "#/$defs/complianceAnswer", "description": "Data flows described?" },
+              "int-check-1": { "$ref": "#/$defs/complianceAnswer", "description": "Interface Catalog, Events, SLAs, Versioning covered?" },
+              "int-check-2": { "$ref": "#/$defs/complianceAnswer", "description": "Consistent API design: resource modelling, errors, pagination?" },
+              "int-check-3": { "$ref": "#/$defs/complianceAnswer", "description": "Event schemas, registry, compatibility rules?" },
+              "int-check-4": { "$ref": "#/$defs/complianceAnswer", "description": "Reliability: idempotency, throttling, rate limiting?" },
+              "int-nfr-1":   { "$ref": "#/$defs/complianceAnswer", "description": "Scalability requirements defined?" },
+              "int-nfr-2":   { "$ref": "#/$defs/complianceAnswer", "description": "Security requirements specified?" },
+              "int-nfr-3":   { "$ref": "#/$defs/complianceAnswer", "description": "Performance metrics defined?" },
+              "int-nfr-4":   { "$ref": "#/$defs/complianceAnswer", "description": "Bandwidth requirements documented?" },
+              "int-nfr-5":   { "$ref": "#/$defs/complianceAnswer", "description": "HA and redundancy considered?" },
+              "int-nfr-6":   { "$ref": "#/$defs/complianceAnswer", "description": "DR requirements specified?" }
+            }
+          }
+        }
+      },
+
+      "data": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 5 domain — Data classification and lifecycle",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "data-meta-1": { "$ref": "#/$defs/complianceAnswer", "description": "Data classification and ownership documented?" },
+              "data-meta-2": { "$ref": "#/$defs/complianceAnswer", "description": "Data usage/management R&R defined?" },
+              "data-meta-3": { "$ref": "#/$defs/complianceAnswer", "description": "Data lifecycle established?" },
+              "data-meta-4": { "$ref": "#/$defs/complianceAnswer", "description": "Data sources and data model documentation maintained?" },
+              "data-meta-5": { "$ref": "#/$defs/complianceAnswer", "description": "Technology stack documented?" },
+              "data-meta-6": { "$ref": "#/$defs/complianceAnswer", "description": "EoS/EoL/version upgrades tracked?" }
+            }
+          }
+        }
+      },
+
+      "infrastructure": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 6 domain — Environments and platform",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "infra-meta-1": { "$ref": "#/$defs/complianceAnswer", "description": "Adequacy of environments/platforms/runtimes assessed?" },
+              "infra-meta-2": { "$ref": "#/$defs/complianceAnswer", "description": "Platform upgrades/EoS/EoL tracked?" },
+              "infra-meta-3": { "$ref": "#/$defs/complianceAnswer", "description": "Demand, capacity, YoY growth documented?" },
+              "infra-meta-4": { "$ref": "#/$defs/complianceAnswer", "description": "Bandwidth adequacy for compute/storage/network verified?" },
+              "infra-oth-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Automation/IaaC implemented?" },
+              "infra-oth-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Audits/Logging configured?" },
+              "infra-oth-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Monitoring/Alerts set up?" },
+              "infra-oth-4":  { "$ref": "#/$defs/complianceAnswer", "description": "TCO 3yr/5yr calculated?" },
+              "infra-oth-5":  { "$ref": "#/$defs/complianceAnswer", "description": "Integrations QoS defined?" },
+              "infra-oth-6":  { "$ref": "#/$defs/complianceAnswer", "description": "Distributed cache required?" },
+              "infra-oth-7":  { "$ref": "#/$defs/complianceAnswer", "description": "Notifications/Events implemented?" },
+              "infra-oth-8":  { "$ref": "#/$defs/complianceAnswer", "description": "Scheduled jobs/batches documented?" },
+              "infra-sec-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Authentication/AuthZ implemented?" },
+              "infra-sec-2":  { "$ref": "#/$defs/complianceAnswer", "description": "RBAC configured?" },
+              "infra-sec-3":  { "$ref": "#/$defs/complianceAnswer", "description": "Key Vault used?" },
+              "infra-sec-4":  { "$ref": "#/$defs/complianceAnswer", "description": "PKI/Encryption implemented?" },
+              "infra-sec-5":  { "$ref": "#/$defs/complianceAnswer", "description": "Certificates managed?" },
+              "infra-sec-6":  { "$ref": "#/$defs/complianceAnswer", "description": "VAPT/Endpoint protection in place?" },
+              "infra-sec-7":  { "$ref": "#/$defs/complianceAnswer", "description": "Standards and legal compliance verified?" },
+              "infra-sec-8":  { "$ref": "#/$defs/complianceAnswer", "description": "Integration security implemented?" }
+            }
+          }
+        }
+      },
+
+      "devsecops": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 7 domain — CI/CD and quality gates",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "devops-1":  { "$ref": "#/$defs/complianceAnswer", "description": "12-Factor compliance verified?" },
+              "devops-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Version control and branching strategy defined?" },
+              "devops-3":  { "$ref": "#/$defs/complianceAnswer", "description": "CI/CD pipeline and toolset established?" },
+              "devops-4":  { "$ref": "#/$defs/complianceAnswer", "description": "Identity access management configured?" },
+              "devops-5":  { "$ref": "#/$defs/complianceAnswer", "description": "Secrets and config management implemented?" },
+              "devops-6":  { "$ref": "#/$defs/complianceAnswer", "description": "Build and packaging automated?" },
+              "devops-7":  { "$ref": "#/$defs/complianceAnswer", "description": "Deployment strategy and release management defined?" },
+              "devops-8":  { "$ref": "#/$defs/complianceAnswer", "description": "Templatisation/IaaC implemented?" },
+              "engex-1":   { "$ref": "#/$defs/complianceAnswer", "description": "Static code analysis implemented?" },
+              "engex-2":   { "$ref": "#/$defs/complianceAnswer", "description": "LLD reviews conducted?" },
+              "engex-3":   { "$ref": "#/$defs/complianceAnswer", "description": "Code reviews mandatory?" },
+              "engex-4":   { "$ref": "#/$defs/complianceAnswer", "description": "Test plan reviews done?" },
+              "engex-5":   { "$ref": "#/$defs/complianceAnswer", "description": "Defect tracking metrics defined?" },
+              "engex-6":   { "$ref": "#/$defs/complianceAnswer", "description": "Automation testing implemented?" },
+              "engex-7":   { "$ref": "#/$defs/complianceAnswer", "description": "API testing conducted?" },
+              "engex-8":   { "$ref": "#/$defs/complianceAnswer", "description": "Performance testing done?" },
+              "engex-9":   { "$ref": "#/$defs/complianceAnswer", "description": "SW quality metrics reporting in place?" },
+              "secops-1":  { "$ref": "#/$defs/complianceAnswer", "description": "Threat models and mitigations documented?" },
+              "secops-2":  { "$ref": "#/$defs/complianceAnswer", "description": "Secure code reviews conducted?" },
+              "secops-3":  { "$ref": "#/$defs/complianceAnswer", "description": "SAST integrated?" },
+              "secops-4":  { "$ref": "#/$defs/complianceAnswer", "description": "DAST implemented?" },
+              "secops-5":  { "$ref": "#/$defs/complianceAnswer", "description": "VAPT completed?" },
+              "secops-6":  { "$ref": "#/$defs/complianceAnswer", "description": "Environment hardening applied?" },
+              "secops-7":  { "$ref": "#/$defs/complianceAnswer", "description": "SW hardening implemented?" },
+              "secops-8":  { "$ref": "#/$defs/complianceAnswer", "description": "Metrics reporting in place?" }
+            }
+          }
+        }
+      },
+
+      "nfr": {
+        "allOf": [{ "$ref": "#/$defs/domainBlock" }],
+        "description": "Step 8 domain — Performance and reliability (qualitative checklist; quantitative rows are in form_data.nfr_criteria)",
+        "properties": {
+          "checklist": {
+            "properties": {
+              "nfr-ha-1":     { "$ref": "#/$defs/complianceAnswer", "description": "Any single point of failures identified?" },
+              "nfr-ha-2":     { "$ref": "#/$defs/complianceAnswer", "description": "HA — Four 9s/Five 9s?" },
+              "nfr-ha-3":     { "$ref": "#/$defs/complianceAnswer", "description": "Failover mechanism defined?" },
+              "nfr-ha-4":     { "$ref": "#/$defs/complianceAnswer", "description": "DR, RPO, RTO documented?" },
+              "nfr-ha-5":     { "$ref": "#/$defs/complianceAnswer", "description": "Error handling implemented?" },
+              "nfr-ha-6":     { "$ref": "#/$defs/complianceAnswer", "description": "Self-healing?" },
+              "nfr-ha-7":     { "$ref": "#/$defs/complianceAnswer", "description": "Cache sync configured?" },
+              "nfr-ha-8":     { "$ref": "#/$defs/complianceAnswer", "description": "Reliability/Extensibility/Maintainability considered?" },
+              "nfr-scalar-1": { "$ref": "#/$defs/complianceAnswer", "description": "Number of users and YoY growth documented?" },
+              "nfr-scalar-2": { "$ref": "#/$defs/complianceAnswer", "description": "Concurrent user count defined?" },
+              "nfr-scalar-3": { "$ref": "#/$defs/complianceAnswer", "description": "TPS/API calls per unit specified?" },
+              "nfr-scalar-4": { "$ref": "#/$defs/complianceAnswer", "description": "Response time < 3 sec?" },
+              "nfr-scalar-5": { "$ref": "#/$defs/complianceAnswer", "description": "Long-running use cases identified?" },
+              "nfr-scalar-6": { "$ref": "#/$defs/complianceAnswer", "description": "Batch/scheduled jobs peak-off-peak considered?" },
+              "nfr-sec-1":    { "$ref": "#/$defs/complianceAnswer", "description": "Authentication/Authorization implemented?" },
+              "nfr-sec-2":    { "$ref": "#/$defs/complianceAnswer", "description": "RBAC/IAM configured?" },
+              "nfr-sec-3":    { "$ref": "#/$defs/complianceAnswer", "description": "Key Vault used?" },
+              "nfr-sec-4":    { "$ref": "#/$defs/complianceAnswer", "description": "PKI/Encryption implemented?" },
+              "nfr-sec-5":    { "$ref": "#/$defs/complianceAnswer", "description": "Certificates managed?" },
+              "nfr-sec-6":    { "$ref": "#/$defs/complianceAnswer", "description": "VAPT/Endpoint protection in place?" },
+              "nfr-sec-7":    { "$ref": "#/$defs/complianceAnswer", "description": "Standards and legal compliance verified?" },
+              "nfr-sec-8":    { "$ref": "#/$defs/complianceAnswer", "description": "Integration security implemented?" }
+            }
+          }
+        }
+      }
+
+    }
+  }
+}

@@ -13,7 +13,7 @@ export class DevSecOpsDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'DS-01',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No CI/CD pipeline documented',
         recommendation: 'Define CI/CD pipeline with build, test, and deployment stages'
       })
@@ -24,7 +24,7 @@ export class DevSecOpsDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'DS-02',
-        severity: 'major',
+        severity: 'high',
         finding: 'No security scanning in CI/CD documented',
         recommendation: 'Integrate SAST, DAST, and dependency scanning into CI/CD pipeline'
       })
@@ -35,7 +35,7 @@ export class DevSecOpsDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'DS-03',
-        severity: 'major',
+        severity: 'high',
         finding: 'No quality gates defined',
         recommendation: 'Define quality gates including code coverage, test coverage, and security thresholds'
       })

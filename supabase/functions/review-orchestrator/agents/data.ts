@@ -13,7 +13,7 @@ export class DataDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'D-01',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No data classification documented',
         recommendation: 'Classify all data according to sensitivity and define handling requirements'
       })
@@ -24,7 +24,7 @@ export class DataDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'D-02',
-        severity: 'major',
+        severity: 'high',
         finding: 'No data architecture or data model documented',
         recommendation: 'Provide data architecture diagram and entity-relationship models'
       })
@@ -35,7 +35,7 @@ export class DataDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'D-03',
-        severity: 'major',
+        severity: 'high',
         finding: 'No data governance framework documented',
         recommendation: 'Define data ownership, stewardship, and governance policies'
       })

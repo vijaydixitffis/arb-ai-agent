@@ -13,7 +13,7 @@ export class IntegrationDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'I-01',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No API design documented',
         recommendation: 'Design and document APIs using RESTful or GraphQL standards'
       })
@@ -24,7 +24,7 @@ export class IntegrationDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'I-02',
-        severity: 'major',
+        severity: 'high',
         finding: 'No integration catalogue documented',
         recommendation: 'Create and maintain integration catalogue with all system dependencies'
       })
@@ -35,7 +35,7 @@ export class IntegrationDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'I-03',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No integration security mechanism documented',
         recommendation: 'Define authentication and authorization mechanisms for all integrations'
       })

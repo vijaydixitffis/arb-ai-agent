@@ -13,7 +13,7 @@ export class SecurityDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'S-01',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No security architecture documented',
         recommendation: 'Provide comprehensive security architecture with threat model'
       })
@@ -24,7 +24,7 @@ export class SecurityDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'S-02',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No authentication/authorization mechanism documented',
         recommendation: 'Define authentication (MFA, SSO) and authorization (RBAC, ABAC) mechanisms'
       })
@@ -35,7 +35,7 @@ export class SecurityDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'S-03',
-        severity: 'critical',
+        severity: 'blocker',
         finding: 'No encryption strategy documented',
         recommendation: 'Define encryption at rest and in transit requirements'
       })
@@ -46,7 +46,7 @@ export class SecurityDomainAgent extends DomainAgent {
       findings.push({
         domain: this.domain,
         principle_id: 'S-04',
-        severity: 'major',
+        severity: 'high',
         finding: 'No compliance requirements documented',
         recommendation: 'Identify applicable compliance frameworks (GDPR, PCI-DSS, SOC2, etc.)'
       })
