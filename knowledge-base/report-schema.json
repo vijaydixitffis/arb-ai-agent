@@ -81,6 +81,10 @@
             "type": "object",
             "required": ["category", "criteria", "target_value", "actual_value", "score"],
             "properties": {
+              "id": {
+                "type": "string",
+                "description": "Client-generated row identifier (Date.now() string) used by the frontend list renderer"
+              },
               "category": {
                 "type": "string",
                 "examples": ["Performance", "Scalability", "Availability", "Security"]

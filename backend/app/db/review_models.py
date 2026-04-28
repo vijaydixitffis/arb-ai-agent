@@ -80,3 +80,20 @@ class Action(Base):
     due_days = Column(Integer, nullable=True)
     due_date = Column(Date, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_id = Column(UUID(as_uuid=True), nullable=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+    user_role = Column(String, nullable=True)
+    action = Column(String, nullable=False)
+    old_status = Column(String, nullable=True)
+    new_status = Column(String, nullable=True)
+    old_decision = Column(String, nullable=True)
+    new_decision = Column(String, nullable=True)
+    # 'metadata' is a reserved name in SQLAlchemy's Base; map to the DB column explicitly
+    audit_metadata = Column("metadata", JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

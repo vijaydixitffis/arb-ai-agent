@@ -186,12 +186,13 @@ export default function ARBSubmission() {
   const handleSaveDraft = async () => {
     try {
       const scopeTags = reviewService.extractScopeTags(formData, artefacts)
-      
+      const solutionName = formData.solution_name || formData.project_name || 'Untitled Review'
+
       const draftData = {
-        solution_name: formData.project_name || 'Untitled Review',
+        solution_name: solutionName,
         scope_tags: scopeTags,
         sa_user_id: user?.id || '',
-        form_data: formData
+        form_data: { ...formData, solution_name: solutionName, scope_tags: scopeTags }
       }
 
       if (submissionId) {

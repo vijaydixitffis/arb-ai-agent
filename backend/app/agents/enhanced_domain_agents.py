@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid as uuid_mod
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.services.llm_service import llm_service, LLMService
 from app.services.artefact_service import ArtefactService
-from app.db.review_models import Review
+from app.db.review_models import AuditLog, Review
 
 logger = logging.getLogger(__name__)
 
@@ -140,13 +141,27 @@ class EnhancedDomainValidationAgent:
             nfr_context=nfr_context,
         )
 
-        # 6. Call LLM
+        # 6. Call LLM — audit both success and failure paths
         logger.info(f"[DOMAIN-AGENT] calling LLM for {domain_slug}")
-        response = await self.llm_service.generate_completion(
-            prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,
-            max_tokens=8192,
+        try:
+            response = await self.llm_service.generate_completion(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.3,
+                max_tokens=8192,
+            )
+        except Exception as llm_exc:
+            self._audit_llm(
+                review_id, domain_slug,
+                response=None, error=llm_exc,
+                user_prompt=user_prompt, system_prompt=system_prompt,
+            )
+            raise
+
+        self._audit_llm(
+            review_id, domain_slug,
+            response=response, error=None,
+            user_prompt=user_prompt, system_prompt=system_prompt,
         )
 
         # 7. Parse DomainReviewPayload
@@ -176,6 +191,59 @@ class EnhancedDomainValidationAgent:
             f"blockers={len(payload.get('blockers', []))}"
         )
         return payload
+
+    # ── Audit helper ──────────────────────────────────────────────────────────
+
+    def _audit_llm(
+        self,
+        review_id: str,
+        domain_slug: str,
+        response: Optional[Dict],
+        error: Optional[Exception],
+        user_prompt: str = "",
+        system_prompt: str = "",
+    ) -> None:
+        """Write one audit_log row recording the LLM call outcome for this domain.
+
+        Uses a fresh DB session so the write is unaffected by the state of the
+        shared session (e.g. an aborted transaction from a prior domain failure).
+        """
+        from app.core.database import SessionLocal
+        try:
+            meta: Dict[str, Any] = {
+                "domain_slug":   domain_slug,
+                "request": {
+                    "system_prompt": system_prompt,
+                    "user_prompt":   user_prompt,
+                },
+            }
+            if response is not None:
+                meta.update({
+                    "status":       "success",
+                    "model":        response.get("model"),
+                    "provider":     response.get("provider"),
+                    "tokens_used":  response.get("tokens_used", 0),
+                    "raw_response": response.get("content", ""),
+                })
+            if error is not None:
+                meta.update({
+                    "status":     "error",
+                    "error":      str(error),
+                    "error_type": type(error).__name__,
+                })
+            log_entry = AuditLog(
+                review_id=uuid_mod.UUID(review_id),
+                action="llm_domain_review",
+                audit_metadata=meta,
+            )
+            audit_db = SessionLocal()
+            try:
+                audit_db.add(log_entry)
+                audit_db.commit()
+            finally:
+                audit_db.close()
+        except Exception as log_exc:
+            logger.warning(f"[DOMAIN-AGENT] audit log failed ({log_exc})")
 
     # ── System prompt (spec §RULES + SCORING RULES) ───────────────────────────
 
@@ -376,15 +444,16 @@ Return a JSON object with this exact top-level structure. No markdown. No prose 
         params = {f"tab{i}": t for i, t in enumerate(tabs)}
 
         try:
-            rows = self.db.execute(text(f"""
-                SELECT check_category,
-                       bool_or(is_mandatory_green) AS is_mandatory_green
-                FROM   question_registry
-                WHERE  frontend_tab IN ({placeholders})
-                AND    is_active = true
-                GROUP  BY check_category
-                ORDER  BY check_category
-            """), params).fetchall()
+            with self.db.begin_nested():
+                rows = self.db.execute(text(f"""
+                    SELECT check_category,
+                           bool_or(is_mandatory_green) AS is_mandatory_green
+                    FROM   question_registry
+                    WHERE  frontend_tab IN ({placeholders})
+                    AND    is_active = true
+                    GROUP  BY check_category
+                    ORDER  BY check_category
+                """), params).fetchall()
 
             if rows:
                 return [{"category": r[0], "is_mandatory_green": bool(r[1])} for r in rows]

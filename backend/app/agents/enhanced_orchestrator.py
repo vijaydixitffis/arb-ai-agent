@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # Delay between sequential domain LLM calls — stays within 15 RPM free-tier limit.
 INTER_DOMAIN_DELAY_S = 0.5
 
+# Delays (seconds) between retry attempts on transient LLM errors (503, timeout, etc.)
+# Two retries: wait 5s then 15s before giving up.
+LLM_RETRY_DELAYS_S = [5, 15]
+
 
 class EnhancedARBOrchestrator:
     """Orchestrates per-domain validation and aggregates results."""
@@ -66,14 +70,14 @@ class EnhancedARBOrchestrator:
                 "solution_name": review.solution_name,
             }
             try:
-                payload = await self.domain_agent.validate_domain(
+                payload = await self._call_domain_with_retry(
                     review_id=review_id,
                     domain_slug=domain_slug,
-                    checklist_data=domain_checklist,
+                    domain_checklist=domain_checklist,
                 )
                 domain_payloads.append({"domain_slug": domain_slug, "payload": payload})
             except Exception as exc:
-                logger.error(f"[ORCHESTRATOR] Domain {domain_slug} failed: {exc}")
+                logger.error(f"[ORCHESTRATOR] Domain {domain_slug} failed after all retries: {exc}")
                 domain_payloads.append({
                     "domain_slug": domain_slug,
                     "payload": {
@@ -310,6 +314,39 @@ class EnhancedARBOrchestrator:
             },
             "category_analysis": category_analysis
         }
+
+    # ── Retry wrapper ─────────────────────────────────────────────────────────
+
+    async def _call_domain_with_retry(
+        self,
+        review_id: str,
+        domain_slug: str,
+        domain_checklist: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Call validate_domain with retries on transient errors.
+
+        Attempt 1 is immediate. On failure, waits LLM_RETRY_DELAYS_S[i] seconds
+        before each subsequent attempt. Raises the last exception if all fail.
+        """
+        delays = [0] + LLM_RETRY_DELAYS_S  # [0, 5, 15] → 3 total attempts
+        last_exc: Exception = RuntimeError("no attempts made")
+        for attempt, delay in enumerate(delays, start=1):
+            if delay > 0:
+                logger.warning(
+                    f"[ORCHESTRATOR] {domain_slug} attempt {attempt} — "
+                    f"retrying in {delay}s after: {last_exc}"
+                )
+                await asyncio.sleep(delay)
+            try:
+                return await self.domain_agent.validate_domain(
+                    review_id=review_id,
+                    domain_slug=domain_slug,
+                    checklist_data=domain_checklist,
+                )
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(f"[ORCHESTRATOR] {domain_slug} attempt {attempt} failed: {exc}")
+        raise last_exc
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

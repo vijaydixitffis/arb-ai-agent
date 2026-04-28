@@ -274,49 +274,59 @@ class ArtefactService:
                 continue
     
     async def search_knowledge_base(
-        self, 
-        query: str, 
+        self,
+        query: str,
         category: Optional[str] = None,
-        limit: int = 5
+        limit: int = 5,
+        max_total_chars: int = 12000,
     ) -> List[Dict[str, Any]]:
-        """Search knowledge base for relevant content"""
-        
+        """Search knowledge base for relevant content.
+
+        Returns up to `limit` entries whose combined content stays within
+        `max_total_chars` characters (~3,000 tokens at 4 chars/token).
+        Entries are ranked by keyword relevance so the most useful ones are
+        kept when the budget runs out.
+        """
         kb_query = self.db.query(KnowledgeBase).filter(
             KnowledgeBase.is_active == True
         )
-        
         if category:
             kb_query = kb_query.filter(KnowledgeBase.category == category)
-        
-        # For now, simple text matching. Will use vector search when available
+
         results = kb_query.all()
-        
-        # Filter results based on query relevance (simple keyword matching for now)
-        relevant_results = []
-        query_terms = query.lower().split()
-        
-        for result in results:
-            content_lower = result.content.lower()
-            title_lower = result.title.lower()
-            
-            # Calculate simple relevance score
-            relevance = 0
-            for term in query_terms:
-                if term in content_lower:
-                    relevance += content_lower.count(term) * 2
-                if term in title_lower:
-                    relevance += title_lower.count(term) * 3
-            
-            if relevance > 0:
-                relevant_results.append({
-                    "id": result.id,
-                    "title": result.title,
-                    "content": result.content,
-                    "category": result.category,
-                    "principle_id": result.principle_id,
-                    "relevance_score": relevance
-                })
-        
-        # Sort by relevance and return top results
-        relevant_results.sort(key=lambda x: x["relevance_score"], reverse=True)
-        return relevant_results[:limit]
+
+        # Keyword relevance scoring
+        query_terms = [t for t in query.lower().split() if len(t) > 2]
+        scored = []
+        for r in results:
+            content_lower = r.content.lower()
+            title_lower   = r.title.lower()
+            relevance = sum(
+                content_lower.count(t) * 2 + title_lower.count(t) * 3
+                for t in query_terms
+            )
+            scored.append((relevance, r))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        # Collect up to `limit` entries within the total character budget
+        selected = []
+        chars_used = 0
+        for relevance, r in scored:
+            if len(selected) >= limit:
+                break
+            content = r.content or ""
+            if chars_used + len(content) > max_total_chars and selected:
+                # Don't overflow the budget; skip large entries once budget is tight
+                continue
+            selected.append({
+                "id":            r.id,
+                "title":         r.title,
+                "content":       content,
+                "category":      r.category,
+                "principle_id":  r.principle_id,
+                "relevance_score": relevance,
+            })
+            chars_used += len(content)
+
+        return selected

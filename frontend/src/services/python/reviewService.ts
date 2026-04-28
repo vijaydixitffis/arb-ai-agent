@@ -276,9 +276,11 @@ export const reviewService = {
    */
   async loadDraftData(reviewId: string) {
     const review = await this.getReviewById(reviewId)
+    // report_json is { form_data: {...}, ai_review: {...} }
+    // Return the inner form_data so the wizard state matches what was saved
     return {
       review,
-      formData: review.report_json || {}
+      formData: review.report_json?.form_data || {}
     }
   },
 

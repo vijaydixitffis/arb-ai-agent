@@ -109,7 +109,10 @@ async def trigger_review(
         _persist_results(db, review_id, result)
     except Exception as exc:
         logger.error(f"[AGENT] Persistence error for {review_id}: {exc}", exc_info=True)
-        # Don't fail the HTTP response — log and return result anyway
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     return {
         "success":    True,
@@ -172,8 +175,9 @@ def _persist_results(db: Session, review_id: str, result: Dict[str, Any]) -> Non
             "processed_at":    datetime.now(timezone.utc).isoformat(),
         }),
     }
-    db.add(review)
-    db.flush()
+    with db.begin_nested():
+        db.add(review)
+        db.flush()
     logger.info(f"[AGENT] Review row updated decision={review.decision} status={review.status}")
 
     # 2. Domain scores (upsert on review_id + domain) ─────────────────────────
@@ -187,7 +191,8 @@ def _persist_results(db: Session, review_id: str, result: Dict[str, Any]) -> Non
             existing_score.score = int(score)
         else:
             db.add(DomainScore(review_id=review_id, domain=domain_slug, score=int(score)))
-    db.flush()
+    with db.begin_nested():
+        db.flush()
     logger.info(f"[AGENT] Domain scores saved: {list(result.get('domain_scores', {}).keys())}")
 
     # 3. Findings (delete-then-insert to avoid duplicates on re-run) ──────────
@@ -206,60 +211,87 @@ def _persist_results(db: Session, review_id: str, result: Dict[str, Any]) -> Non
             "check_category": "BLOCKER",
         })
 
+    saved_findings = 0
     for f in all_findings:
-        raw_score = f.get("rag_score", 3)
-        severity  = _rag_score_to_severity(int(raw_score) if str(raw_score).isdigit() else 3)
-        db.add(Finding(
-            review_id     = review_id,
-            domain        = f.get("domain_slug") or f.get("domain", ""),
-            principle_id  = f.get("principle_id") or None,
-            severity      = severity,          # critical | major | minor
-            finding       = f.get("finding", ""),
-            recommendation= f.get("recommendation") or None,
-            is_resolved   = False,
-        ))
-    db.flush()
-    logger.info(f"[AGENT] Findings saved: {len(all_findings)}")
+        finding_text = (f.get("finding") or "").strip()
+        if not finding_text:
+            logger.warning(f"[AGENT] skipping finding with empty text — domain={f.get('domain_slug') or f.get('domain')}")
+            continue
+        try:
+            raw_score = f.get("rag_score", 3)
+            severity  = _rag_score_to_severity(int(raw_score) if str(raw_score).isdigit() else 3)
+            with db.begin_nested():
+                db.add(Finding(
+                    review_id     = review_id,
+                    domain        = f.get("domain_slug") or f.get("domain") or "",
+                    principle_id  = f.get("principle_id") or None,
+                    severity      = severity,
+                    finding       = finding_text,
+                    recommendation= f.get("recommendation") or None,
+                    is_resolved   = False,
+                ))
+                db.flush()
+            saved_findings += 1
+        except Exception as exc:
+            logger.warning(f"[AGENT] finding save skipped: {exc} — domain={f.get('domain_slug') or f.get('domain')}")
+    logger.info(f"[AGENT] Findings saved: {saved_findings}/{len(all_findings)}")
 
     # 4. Actions ──────────────────────────────────────────────────────────────
+    saved_actions = 0
     for act in result.get("actions", []):
-        raw_days = act.get("due_days")
+        action_text = (act.get("action") or "").strip()
+        if not action_text:
+            continue
         try:
-            due_days = int(raw_days) if raw_days is not None else None
-        except (TypeError, ValueError):
-            due_days = None
-
-        due_date = _due_date_from_days(due_days)
-        db.add(Action(
-            review_id  = review_id,
-            action_text= act.get("action", ""),
-            owner_role = act.get("owner_role", "solution_architect"),
-            due_days   = due_days,
-            due_date   = due_date,
-            status     = "open",   # DB constraint: open | in_progress | completed | blocked
-        ))
-    db.flush()
-    logger.info(f"[AGENT] Actions saved: {len(result.get('actions', []))}")
+            raw_days = act.get("due_days")
+            try:
+                due_days = int(raw_days) if raw_days is not None else None
+            except (TypeError, ValueError):
+                due_days = None
+            with db.begin_nested():
+                db.add(Action(
+                    review_id  = review_id,
+                    action_text= action_text,
+                    owner_role = act.get("owner_role") or "solution_architect",
+                    due_days   = due_days,
+                    due_date   = _due_date_from_days(due_days),
+                    status     = "open",
+                ))
+                db.flush()
+            saved_actions += 1
+        except Exception as exc:
+            logger.warning(f"[AGENT] action save skipped: {exc}")
+    logger.info(f"[AGENT] Actions saved: {saved_actions}/{len(result.get('actions', []))}")
 
     # 5. ADRs ─────────────────────────────────────────────────────────────────
+    saved_adrs = 0
     for i, adr in enumerate(result.get("adrs", []), start=1):
-        adr_type         = adr.get("type", "DECISION")
-        waiver_expiry    = adr.get("waiver_expiry_date")
-        consequences_txt = f"waiver_expiry_date: {waiver_expiry}" if adr_type == "WAIVER" and waiver_expiry else None
-
-        db.add(ADR(
-            review_id   = review_id,
-            adr_id      = adr.get("id") or f"ADR-{review_id[:8]}-{i:03d}",
-            decision    = adr.get("decision", ""),
-            rationale   = adr.get("rationale", ""),
-            context     = adr.get("context") or None,
-            consequences= consequences_txt,
-            owner       = adr.get("owner") or None,
-            target_date = _parse_date(adr.get("target_date")),
-            status      = "proposed",  # DB constraint: proposed | accepted | rejected | superseded
-        ))
-    db.flush()
-    logger.info(f"[AGENT] ADRs saved: {len(result.get('adrs', []))}")
+        decision_text  = (adr.get("decision") or "").strip()
+        rationale_text = (adr.get("rationale") or "").strip()
+        if not decision_text or not rationale_text:
+            logger.warning(f"[AGENT] skipping ADR-{i} with empty decision/rationale")
+            continue
+        try:
+            adr_type         = adr.get("type", "DECISION")
+            waiver_expiry    = adr.get("waiver_expiry_date")
+            consequences_txt = f"waiver_expiry_date: {waiver_expiry}" if adr_type == "WAIVER" and waiver_expiry else None
+            with db.begin_nested():
+                db.add(ADR(
+                    review_id   = review_id,
+                    adr_id      = adr.get("id") or f"ADR-{review_id[:8]}-{i:03d}",
+                    decision    = decision_text,
+                    rationale   = rationale_text,
+                    context     = adr.get("context") or None,
+                    consequences= consequences_txt,
+                    owner       = adr.get("owner") or None,
+                    target_date = _parse_date(adr.get("target_date")),
+                    status      = "proposed",
+                ))
+                db.flush()
+            saved_adrs += 1
+        except Exception as exc:
+            logger.warning(f"[AGENT] ADR save skipped: {exc} — adr_id={adr.get('id', f'ADR-{i}')}")
+    logger.info(f"[AGENT] ADRs saved: {saved_adrs}/{len(result.get('adrs', []))}")
 
     db.commit()
     logger.info(f"[AGENT] All results committed for review={review_id}")

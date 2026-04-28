@@ -44,7 +44,8 @@ serve(async (req) => {
       throw new Error(`Review not found: ${reviewError?.message}`)
     }
 
-    if (review.status !== 'pending') {
+    // Accept 'pending' or 'submitted' — frontend sets 'submitted' before triggering
+    if (!['pending', 'submitted'].includes(review.status)) {
       throw new Error(`Review already processed: ${review.status}`)
     }
 
@@ -129,9 +130,10 @@ serve(async (req) => {
             review_id:      reviewId,
             domain:         f.domain,
             principle_id:   f.principle_id   || null,
-            severity:       f.severity,
+            severity:       f.severity,        // critical | major | minor (DB constraint)
             finding:        f.finding,
             recommendation: f.recommendation || null,
+            is_resolved:    false,
           }))
         )
       if (findErr) console.error('findings insert failed:', findErr.message)
@@ -142,15 +144,23 @@ serve(async (req) => {
       const { error: adrErr } = await supabase
         .from('adrs')
         .insert(
-          reviewResult.adrs.map(adr => ({
-            review_id:   reviewId,
-            adr_id:      adr.id,
-            decision:    adr.decision,
-            rationale:   adr.rationale,
-            context:     adr.context    ?? null,
-            owner:       adr.owner      ?? null,
-            target_date: adr.target_date ?? null,
-          }))
+          reviewResult.adrs.map((adr, i) => {
+            const adrId = adr.id || `ADR-${reviewId.slice(0, 8)}-${String(i + 1).padStart(3, '0')}`
+            const consequences = (adr.type === 'WAIVER' && adr.waiver_expiry_date)
+              ? `waiver_expiry_date: ${adr.waiver_expiry_date}`
+              : null
+            return {
+              review_id:    reviewId,
+              adr_id:       adrId,
+              decision:     adr.decision,
+              rationale:    adr.rationale,
+              context:      adr.context      ?? null,
+              consequences: consequences,
+              owner:        adr.owner        ?? null,
+              target_date:  adr.target_date  ?? null,
+              status:       'proposed',       // DB constraint: proposed | accepted | rejected | superseded
+            }
+          })
         )
       if (adrErr) console.error('adrs insert failed:', adrErr.message)
     }
@@ -161,17 +171,17 @@ serve(async (req) => {
         .from('actions')
         .insert(
           reviewResult.actions.map(action => {
-            const dueDate = action.due_days
-              ? new Date(Date.now() + action.due_days * 86_400_000)
-                  .toISOString()
-                  .split('T')[0]
+            const dueDays = action.due_days != null ? parseInt(String(action.due_days), 10) || null : null
+            const dueDate = dueDays
+              ? new Date(Date.now() + dueDays * 86_400_000).toISOString().split('T')[0]
               : null
             return {
-              review_id:  reviewId,
+              review_id:   reviewId,
               action_text: action.action,
               owner_role:  action.owner_role,
-              due_days:    action.due_days,
+              due_days:    dueDays,
               due_date:    dueDate,
+              status:      'open',            // DB constraint: open | in_progress | completed | blocked
             }
           })
         )
