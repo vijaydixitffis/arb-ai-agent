@@ -76,7 +76,7 @@ class FormData(BaseModel):
     @validator('scope_tags')
     def validate_scope_tags(cls, v):
         valid_domains = [
-            'general', 'business', 'application', 'integration', 
+            'solution', 'business', 'application', 'integration',
             'data', 'infrastructure', 'devsecops', 'nfr'
         ]
         for tag in v:
@@ -126,8 +126,8 @@ def validate_arb_form_data(form_data: Dict[str, Any], is_draft: bool = True) -> 
             if not validated_data.business_drivers or len(validated_data.business_drivers) == 0:
                 errors.append("At least one business driver is required")
             
-            if not validated_data.domain_data or len(validated_data.domain_data) == 0:
-                errors.append("Domain data is required")
+            # Domain data is no longer required - only selected domains (scope_tags) matter
+            pass
         else:
             # For drafts, only warn about missing data but don't error
             if not validated_data.project_name or not validated_data.project_name.strip():
@@ -141,17 +141,14 @@ def validate_arb_form_data(form_data: Dict[str, Any], is_draft: bool = True) -> 
             
             if not validated_data.business_drivers or len(validated_data.business_drivers) == 0:
                 warnings.append("No business drivers specified")
-            
-            if not validated_data.domain_data or len(validated_data.domain_data) == 0:
-                warnings.append("No domain data completed")
         
         # NFR criteria validation (always a warning, never an error)
         if not validated_data.nfr_criteria or len(validated_data.nfr_criteria) == 0:
             warnings.append("No NFR criteria defined - consider adding quantitative measures")
         
-        # Domain data validation
+        # Domain data validation - checklists are OPTIONAL in +EARR flow
         valid_domains = [
-            'general', 'business', 'application', 'integration', 
+            'solution', 'business', 'application', 'integration',
             'data', 'infrastructure', 'devsecops', 'nfr'
         ]
         
@@ -165,8 +162,9 @@ def validate_arb_form_data(form_data: Dict[str, Any], is_draft: bool = True) -> 
             if has_checklist:
                 domains_with_checklist.append(domain_slug)
         
+        # Checklists are optional - just informational
         if len(domains_with_checklist) == 0:
-            warnings.append("No domain checklists completed - consider adding compliance assessments")
+            warnings.append("No domain checklists completed - checklists are optional but recommended")
         
         # Cross-validation warnings
         if validated_data.nfr_criteria and len(validated_data.nfr_criteria) > 0:
@@ -199,24 +197,35 @@ def validate_submission_completeness(form_data: Dict[str, Any], artefacts: Dict[
     """
     Validate submission completeness including artifacts
     is_draft: If True, allows empty form data for browsing; if False, enforces all requirements
+    
+    New +EARR requirements:
+    1. User selects only domains needed (scope_tags) - not all mandatory
+    2. Checklists are optional for selected domains
+    3. At least one artifact per SELECTED domain (not total across all domains)
     """
     base_validation = validate_arb_form_data(form_data, is_draft=is_draft)
     errors = list(base_validation.errors)
     warnings = list(base_validation.warnings)
     
+    # Get selected domains from scope_tags
+    scope_tags = form_data.get("scope_tags", [])
+    selected_domains = set(scope_tags) if scope_tags else set()
+    
     if not is_draft:
-        # Only enforce artifact requirements for submissions, not drafts
-        total_artifacts = 0
+        # NEW: At least one domain must be selected
+        if not selected_domains:
+            errors.append("At least one domain must be selected")
+        
+        # NEW: Check each SELECTED domain has at least one artifact
         if artefacts:
-            total_artifacts = sum(len(domain_artefacts) for domain_artefacts in artefacts.values())
-        
-        if total_artifacts == 0:
-            errors.append("At least one artifact must be uploaded")
-        
-        # Check if scope tags are properly extracted
-        scope_tags = form_data.get("scope_tags", [])
-        if not scope_tags or len(scope_tags) == 0:
-            errors.append("Scope tags must be extracted from domain data and artifacts")
+            for domain in selected_domains:
+                domain_artefacts = artefacts.get(domain, [])
+                if not domain_artefacts or len(domain_artefacts) == 0:
+                    errors.append(f"At least one artifact must be uploaded for selected domain: {domain}")
+        else:
+            # If no artefacts dict at all, all selected domains are missing artefacts
+            for domain in selected_domains:
+                errors.append(f"At least one artifact must be uploaded for selected domain: {domain}")
         
         # Ensure solution_name is set
         solution_name = form_data.get("solution_name")
@@ -224,16 +233,17 @@ def validate_submission_completeness(form_data: Dict[str, Any], artefacts: Dict[
             errors.append("Solution name is required")
     else:
         # For drafts, just warn about missing artifacts and scope tags
-        total_artifacts = 0
+        if not selected_domains:
+            warnings.append("No domains selected - please select at least one domain")
+        
         if artefacts:
-            total_artifacts = sum(len(domain_artefacts) for domain_artefacts in artefacts.values())
-        
-        if total_artifacts == 0:
-            warnings.append("No artifacts uploaded yet")
-        
-        scope_tags = form_data.get("scope_tags", [])
-        if not scope_tags or len(scope_tags) == 0:
-            warnings.append("No scope tags extracted")
+            for domain in selected_domains:
+                domain_artefacts = artefacts.get(domain, [])
+                if not domain_artefacts or len(domain_artefacts) == 0:
+                    warnings.append(f"No artifacts uploaded yet for domain: {domain}")
+        else:
+            for domain in selected_domains:
+                warnings.append(f"No artifacts uploaded yet for domain: {domain}")
         
         solution_name = form_data.get("solution_name")
         if not solution_name or not solution_name.strip():
@@ -275,23 +285,31 @@ def validate_review_data_structure(review_data: Dict[str, Any]) -> ValidationRes
             errors.append(f"Missing required field: {field}")
     
     # Validate status
-    valid_statuses = ['draft', 'pending', 'submitted', 'in_review', 'reviewed', 'approved', 'rejected', 'deferred']
+    valid_statuses = [
+        'drafting', 'queued', 'analysing', 'review_ready',
+        'ea_reviewing', 'returned', 'approved', 'conditionally_approved',
+        'deferred', 'rejected', 'closed',
+        # legacy aliases accepted during transition
+        'draft', 'pending', 'submitted', 'in_review', 'ea_review', 'rework',
+    ]
     status = review_data.get('status')
     if status and status not in valid_statuses:
         errors.append(f"Invalid status: {status}. Valid statuses: {', '.join(valid_statuses)}")
     
-    # Validate scope tags
+    # Validate scope tags - at least one domain should be selected for +EARR
     scope_tags = review_data.get('scope_tags', [])
     if scope_tags and not isinstance(scope_tags, list):
         errors.append("Scope tags must be an array")
+    elif not scope_tags:
+        warnings.append("No domains selected - at least one domain should be selected for +EARR")
     
-    # Validate report_json if present
+    # Validate report_json if present - use relaxed validation for +EARR
     report_json = review_data.get('report_json')
     if report_json and isinstance(report_json, dict):
         form_data = report_json.get('form_data')
         if form_data:
-            form_validation = validate_arb_form_data(form_data)
-            errors.extend(form_validation.errors)
+            # Use draft validation (warnings only) for structure validation
+            form_validation = validate_arb_form_data(form_data, is_draft=True)
             warnings.extend(form_validation.warnings)
     
     return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)

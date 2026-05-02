@@ -18,9 +18,13 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     GEMINI_MODEL: str = "gemini-2.5-flash-lite"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
-    
+
+    # OpenRouter Configuration (OpenAI-compatible, supports free/paid models)
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_MODEL: str = "openai/gpt-oss-120b:free"
+
     # LLM Provider Selection
-    LLM_PROVIDER: str = "openai"  # Options: "openai", "gemini"
+    LLM_PROVIDER: str = "gemini"  # Options: "openai", "gemini", "openrouter"
     
     # PostgreSQL Configuration
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/arb_ai_agent"

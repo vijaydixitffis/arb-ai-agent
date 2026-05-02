@@ -8,7 +8,7 @@ const backendType = import.meta.env.VITE_BACKEND_TYPE || 'python'
 // Define interfaces for backend responses
 interface ReviewStatus {
   id: string
-  status: 'submitted' | 'pending' | 'in_review' | 'ea_review' | 'approved' | 'rejected' | 'deferred' | 'reviewed'
+  status: 'drafting' | 'queued' | 'analysing' | 'review_ready' | 'ea_reviewing' | 'returned' | 'approved' | 'conditionally_approved' | 'deferred' | 'rejected' | 'closed' | string
   decision: string | null
   report_json: any
   domain_scores: any[]

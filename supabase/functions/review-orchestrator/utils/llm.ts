@@ -35,6 +35,11 @@ export async function callLLM(input: LLMCallInput): Promise<LLMResponse> {
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set')
     return await callAnthropic(systemPrompt, userPrompt, model, apiKey)
+  } else if (model.includes('/')) {
+    // OpenRouter models use "provider/model" format (e.g. "google/gemma-4-26b-a4b-it:free")
+    const apiKey = Deno.env.get('OPENROUTER_API_KEY')
+    if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set')
+    return await callOpenRouter(systemPrompt, userPrompt, model, apiKey)
   } else {
     throw new Error(`Unsupported model: ${model}`)
   }
@@ -67,7 +72,7 @@ async function callGemini(
         },
       ],
       generationConfig: {
-        temperature: 0.3,
+        temperature: 0.5,
         maxOutputTokens: 8192,
         responseMimeType: 'application/json',
       },
@@ -117,7 +122,7 @@ async function callOpenAI(
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: userPrompt   },
       ],
-      temperature:     0.3,
+      temperature:     0.5,
       max_tokens:      8000,
       response_format: { type: 'json_object' },
     }),
@@ -168,6 +173,48 @@ async function callAnthropic(
   const data       = await response.json()
   const content    = data.content[0].text as string
   const tokensUsed = (data.usage.input_tokens + data.usage.output_tokens) as number
+
+  return { content, tokensUsed }
+}
+
+// ── OpenRouter ────────────────────────────────────────────────────────────────
+// OpenAI-compatible endpoint. Supports free and paid models from many providers.
+// Model format: "provider/model-name[:tier]"  e.g. "google/gemma-4-26b-a4b-it:free"
+
+async function callOpenRouter(
+  systemPrompt: string,
+  userPrompt: string,
+  model: string,
+  apiKey: string
+): Promise<LLMResponse> {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization':  `Bearer ${apiKey}`,
+      'Content-Type':   'application/json',
+      'HTTP-Referer':   'https://arb-ai-agent.app',
+      'X-Title':        'ARB AI Agent',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userPrompt   },
+      ],
+      temperature:     0.5,
+      max_tokens:      8000,
+      response_format: { type: 'json_object' },
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`OpenRouter API error: ${response.status} - ${error}`)
+  }
+
+  const data       = await response.json()
+  const content    = data.choices[0].message.content as string
+  const tokensUsed = (data.usage?.total_tokens as number) ?? 0
 
   return { content, tokensUsed }
 }

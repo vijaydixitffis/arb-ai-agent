@@ -1,7 +1,7 @@
 import { DomainAgent, Finding } from './domain-agent.ts'
 
-export class GeneralDomainAgent extends DomainAgent {
-  domain = 'general'
+export class SolutionDomainAgent extends DomainAgent {
+  domain = 'solution'
   relevantPrinciples = ['G-01', 'G-02', 'G-03', 'G-04', 'G-05']
   
   protected extractFindings(artifactText: string, mdContent: string): Finding[] {

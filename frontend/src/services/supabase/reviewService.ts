@@ -8,13 +8,22 @@ const ensureSupabase = () => {
   return supabase
 }
 
+export interface ArtefactResponse {
+  id: string
+  review_id: string
+  domain_slug: string
+  artefact_name: string
+  artefact_type: string
+  filename: string
+  file_type?: string
+  file_size_bytes?: number
+  uploaded_at: string
+  is_active: boolean
+}
+
 export interface ReviewData {
   solution_name: string
   scope_tags: string[]
-  artifact_path: string
-  artifact_filename: string
-  artifact_file_type: string
-  artifact_file_size_bytes?: number
   sa_user_id: string
   llm_model?: string
 }
@@ -24,7 +33,7 @@ export interface DraftData {
   scope_tags: string[]
   sa_user_id: string
   form_data?: any
-  status?: 'draft' | 'submitted' | 'ready_for_review'
+  status?: 'drafting' | 'queued' | 'returned' | 'draft' | 'submitted'
 }
 
 export interface ReviewResult {
@@ -36,7 +45,7 @@ export interface ReviewResult {
 
 export interface ReviewStatus {
   id: string
-  status: 'pending' | 'in_review' | 'submitted' | 'ea_review' | 'approved' | 'rejected' | 'deferred' | 'reviewed'
+  status: 'drafting' | 'queued' | 'analysing' | 'review_ready' | 'ea_reviewing' | 'returned' | 'approved' | 'conditionally_approved' | 'deferred' | 'rejected' | 'closed' | string
   decision: string | null
   report_json: any
   domain_scores: any[]
@@ -57,12 +66,9 @@ export const reviewService = {
       .insert({
         solution_name: data.solution_name,
         scope_tags: data.scope_tags,
-        artifact_path: '',
-        artifact_filename: '',
-        artifact_file_type: '',
         sa_user_id: data.sa_user_id,
-        status: 'draft',
-        report_json: { form_data: data.form_data } // Store form data in report_json for drafts
+        status: 'drafting',
+        report_json: { form_data: data.form_data }
       })
       .select()
       .single()
@@ -89,7 +95,10 @@ export const reviewService = {
         .single()
       
       const existingFormData = existingReview?.report_json?.form_data || {}
-      updateData.report_json = { form_data: { ...existingFormData, ...data.form_data } }
+      updateData.report_json = { 
+        ...existingReview?.report_json, 
+        form_data: { ...existingFormData, ...data.form_data } 
+      }
     }
 
     const { data: review, error } = await ensureSupabase()
@@ -97,7 +106,7 @@ export const reviewService = {
       .update(updateData)
       .eq('id', reviewId)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) throw error
     return review
@@ -106,6 +115,11 @@ export const reviewService = {
   /**
    * Validate submission completeness
    * Returns validation result with missing fields
+   * 
+   * Requirements:
+   * - At least 1 domain must be selected (scope_tags)
+   * - At least 1 artefact must be uploaded
+   * - Checklists are optional (user can choose to fill or skip)
    */
   async validateCompleteness(reviewId: string): Promise<{
     isComplete: boolean
@@ -123,13 +137,19 @@ export const reviewService = {
     const missingFields: string[] = []
     const errors: string[] = []
 
-    // Check if artifact is uploaded
-    if (!review.artifact_path || review.artifact_path === '') {
+    // Check if any artefacts have been uploaded (from artefacts table)
+    const { data: artefacts, error: artefactError } = await ensureSupabase()
+      .from('artefacts')
+      .select('id')
+      .eq('review_id', reviewId)
+      .eq('is_active', true)
+
+    if (!artefactError && (!artefacts || artefacts.length === 0)) {
       missingFields.push('artifact')
       errors.push('At least one artifact must be uploaded')
     }
 
-    // Check if scope tags are present
+    // Check if scope tags are present (at least 1 domain selected)
     if (!review.scope_tags || review.scope_tags.length === 0) {
       missingFields.push('scope_tags')
       errors.push('At least one domain must be selected')
@@ -138,23 +158,13 @@ export const reviewService = {
     // Check form data completeness
     const formData = review.report_json?.form_data || {}
     
-    // Check required fields
-    if (!formData.project_name) {
+    // Check required fields (support both old and new formats)
+    if (!formData.project_name && !formData.solution_name) {
       missingFields.push('project_name')
       errors.push('Project name is required')
     }
 
-    // Check domain checklists
-    const requiredDomains = ['business', 'application', 'integration', 'data', 'security', 'infrastructure', 'devsecops']
-    const domainsWithChecklist = review.scope_tags?.filter((tag: string) => requiredDomains.includes(tag)) || []
-    
-    for (const domain of domainsWithChecklist) {
-      const checklistKey = `${domain}_checklist`
-      if (!formData[checklistKey] || Object.keys(formData[checklistKey]).length === 0) {
-        missingFields.push(`${domain}_checklist`)
-        errors.push(`${domain.charAt(0).toUpperCase() + domain.slice(1)} checklist is incomplete`)
-      }
-    }
+    // Note: Checklists are now optional - no validation required
 
     return {
       isComplete: missingFields.length === 0,
@@ -178,7 +188,7 @@ export const reviewService = {
     const { error: updateError } = await ensureSupabase()
       .from('reviews')
       .update({ 
-        status: 'submitted',
+        status: 'queued',
         submitted_at: new Date().toISOString()
       })
       .eq('id', reviewId)
@@ -200,12 +210,8 @@ export const reviewService = {
       .insert({
         solution_name: data.solution_name,
         scope_tags: data.scope_tags,
-        artifact_path: data.artifact_path,
-        artifact_filename: data.artifact_filename,
-        artifact_file_type: data.artifact_file_type,
-        artifact_file_size_bytes: data.artifact_file_size_bytes,
         sa_user_id: data.sa_user_id,
-        status: 'pending',
+        status: 'queued',
         llm_model: data.llm_model || 'gpt-4o'
       })
       .select()
@@ -249,15 +255,27 @@ export const reviewService = {
     artifact_file_type: string
     artifact_file_size_bytes: number
   }) {
+    // Artifact metadata is stored in report_json.artefact_uploads — no direct columns exist
+    const { data: existing } = await ensureSupabase()
+      .from('reviews')
+      .select('report_json')
+      .eq('id', reviewId)
+      .single()
+
+    const currentJson = existing?.report_json || {}
+    const uploads = currentJson.artefact_uploads || []
+    uploads.push({
+      file_name: artifactInfo.artifact_filename,
+      storage_path: artifactInfo.artifact_path,
+      file_type: artifactInfo.artifact_file_type,
+      file_size_bytes: artifactInfo.artifact_file_size_bytes,
+      uploaded_at: new Date().toISOString(),
+      is_active: true
+    })
+
     const { error } = await ensureSupabase()
       .from('reviews')
-      .update({
-        artifact_path: artifactInfo.artifact_path,
-        artifact_filename: artifactInfo.artifact_filename,
-        artifact_file_type: artifactInfo.artifact_file_type,
-        artifact_file_size_bytes: artifactInfo.artifact_file_size_bytes,
-        submitted_at: new Date().toISOString()
-      })
+      .update({ report_json: { ...currentJson, artefact_uploads: uploads } })
       .eq('id', reviewId)
 
     if (error) throw error
@@ -329,10 +347,7 @@ export const reviewService = {
           onUpdate(status)
 
           // Check if review is complete
-          if (status.status === 'ea_review' || 
-              status.status === 'approved' || 
-              status.status === 'rejected' || 
-              status.status === 'deferred') {
+          if (['review_ready', 'ea_reviewing', 'approved', 'conditionally_approved', 'rejected', 'deferred', 'closed'].includes(status.status)) {
             resolve(status)
             return
           }
@@ -417,7 +432,7 @@ export const reviewService = {
   extractScopeTags(formData: any, artefacts?: Record<string, any[]>): string[] {
     const tags: Set<string> = new Set()
     const VALID_DOMAINS = [
-      'general', 'business', 'application', 'integration', 
+      'solution', 'business', 'application', 'integration',
       'data', 'infrastructure', 'devsecops', 'nfr'
     ]
 
@@ -508,8 +523,8 @@ export const reviewService = {
 
     // Ensure at least one tag exists for AI review to run
     if (tags.size === 0) {
-      console.warn('No valid scope tags found, defaulting to "general"')
-      tags.add('general')
+      console.warn('No valid scope tags found, defaulting to "solution"')
+      tags.add('solution')
     }
 
     // Sort tags for consistency
@@ -536,5 +551,159 @@ export const reviewService = {
 
     if (error) throw error
     return data.signedUrl
+  },
+
+  /**
+   * Upload domain-specific artefacts to Supabase Storage and track metadata in
+   * report_json.artefact_uploads so the edge function can read them.
+   */
+  async uploadArtefacts(
+    reviewId: string,
+    artefacts: { domain: string; name: string; type: string; file: File }[]
+  ): Promise<ArtefactResponse[]> {
+    const results: ArtefactResponse[] = []
+
+    for (const artefact of artefacts) {
+      const artefactId = crypto.randomUUID()
+      const safeName = artefact.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const storagePath = `${reviewId}/${artefact.domain}/${safeName}`
+      const uploadedAt = new Date().toISOString()
+
+      const { error: storageError } = await ensureSupabase()
+        .storage
+        .from('review-artifacts')
+        .upload(storagePath, artefact.file, { upsert: true, contentType: artefact.file.type })
+
+      if (storageError) throw storageError
+
+      // Merge new entry into report_json.artefact_uploads
+      const { data: existing, error: fetchError } = await ensureSupabase()
+        .from('reviews')
+        .select('report_json')
+        .eq('id', reviewId)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      const existingUploads: any[] = existing.report_json?.artefact_uploads ?? []
+      const newEntry = {
+        artefact_id:      artefactId,
+        file_name:        artefact.file.name,
+        artefact_name:    artefact.name,
+        artefact_category: artefact.type,
+        domain_tags:      [artefact.domain],
+        storage_path:     storagePath,
+        file_type:        artefact.file.type,
+        file_size_bytes:  artefact.file.size,
+        parsed_text:      null,
+        parse_status:     'pending',
+        uploaded_at:      uploadedAt,
+        is_active:        true,
+      }
+
+      // Insert into artefacts table
+      const { error: artefactInsertError } = await ensureSupabase()
+        .from('artefacts')
+        .insert({
+          id: artefactId,
+          review_id: reviewId,
+          domain_slug: artefact.domain,
+          artefact_name: artefact.name,
+          artefact_type: artefact.type,
+          filename: artefact.file.name,
+          storage_path: storagePath,
+          file_type: artefact.file.type,
+          file_size_bytes: artefact.file.size,
+          is_active: true,
+        })
+
+      if (artefactInsertError) throw artefactInsertError
+
+      // Also update report_json.artefact_uploads for backward compatibility
+      const { error: updateError } = await ensureSupabase()
+        .from('reviews')
+        .update({ report_json: { ...existing.report_json, artefact_uploads: [...existingUploads, newEntry] } })
+        .eq('id', reviewId)
+
+      if (updateError) throw updateError
+
+      results.push({
+        id:            artefactId,
+        review_id:     reviewId,
+        domain_slug:   artefact.domain,
+        artefact_name: artefact.name,
+        artefact_type: artefact.type,
+        filename:      artefact.file.name,
+        file_type:     artefact.file.type,
+        file_size_bytes: artefact.file.size,
+        uploaded_at:   uploadedAt,
+        is_active:     true,
+      })
+    }
+
+    return results
+  },
+
+  /**
+   * List all active artefacts for a review, read from the artefacts table.
+   */
+  async getReviewArtefacts(reviewId: string): Promise<ArtefactResponse[]> {
+    const { data: artefacts, error } = await ensureSupabase()
+      .from('artefacts')
+      .select('*')
+      .eq('review_id', reviewId)
+      .eq('is_active', true)
+
+    if (error) throw error
+
+    return artefacts.map((a: any) => ({
+      id:            a.id,
+      review_id:     a.review_id,
+      domain_slug:   a.domain_slug,
+      artefact_name: a.artefact_name,
+      artefact_type: a.artefact_type,
+      filename:      a.filename,
+      file_type:     a.file_type,
+      file_size_bytes: a.file_size_bytes,
+      uploaded_at:   a.created_at,
+      is_active:     a.is_active,
+    }))
+  },
+
+  /**
+   * Soft-delete an artefact by marking it inactive in both the artefacts table
+   * and report_json.artefact_uploads.
+   * reviewId is required for the Supabase backend to locate the record.
+   */
+  async deleteArtefact(artefactId: string, reviewId: string): Promise<void> {
+    // Mark as inactive in artefacts table
+    const { error: artefactUpdateError } = await ensureSupabase()
+      .from('artefacts')
+      .update({ is_active: false })
+      .eq('id', artefactId)
+      .eq('review_id', reviewId)
+
+    if (artefactUpdateError) throw artefactUpdateError
+
+    // Also mark as inactive in report_json.artefact_uploads for backward compatibility
+    const { data: review, error: fetchError } = await ensureSupabase()
+      .from('reviews')
+      .select('report_json')
+      .eq('id', reviewId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const uploads: any[] = review.report_json?.artefact_uploads ?? []
+    const updated = uploads.map(u =>
+      u.artefact_id === artefactId ? { ...u, is_active: false } : u
+    )
+
+    const { error: updateError } = await ensureSupabase()
+      .from('reviews')
+      .update({ report_json: { ...review.report_json, artefact_uploads: updated } })
+      .eq('id', reviewId)
+
+    if (updateError) throw updateError
   }
 }

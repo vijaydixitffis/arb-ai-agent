@@ -28,7 +28,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 app = FastAPI(
     title="ARB AI Agent API",
     description="Architecture Review Board AI Agent Backend",
-    version="1.0.0"
+    version="1.0.0",
+    redirect_slashes=False,
 )
 
 # Add request logging middleware first

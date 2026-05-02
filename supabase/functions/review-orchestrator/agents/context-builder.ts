@@ -63,7 +63,7 @@ export async function getRegistryForAgent(
 
 export function getFrontendTabsForAgent(agentDomain: string): string[] {
   const map: Record<string, string[]> = {
-    general:      ['general'],
+    solution:     ['solution'],
     business:     ['business'],
     application:  ['application'],
     software:     ['application'],   // app-soft-* lives in same tab
@@ -122,28 +122,40 @@ export function formatChecklistBlock(
   enriched:    EnrichedQuestion[],
   agentDomain: string
 ): string {
+  // Exclude N/A (SA explicitly out-of-scope) AND not_answered (SA never attempted — optional per UI)
+  const naCount         = enriched.filter(q => q.answer === 'na').length
+  const notAttempted    = enriched.filter(q => q.answer === 'not_answered').length
+  const active          = enriched.filter(q => q.answer !== 'na' && q.answer !== 'not_answered')
+
+  if (active.length === 0) {
+    return [
+      `== SA CHECKLIST — domain: ${agentDomain} — no checklist items attempted by SA ==`,
+      `   (${enriched.length} registered; ${naCount} marked N/A; ${notAttempted} not attempted — all excluded)`,
+      `   Assess domain compliance using artefact evidence only.`,
+    ].join('\n')
+  }
+
   const groups = new Map<string, EnrichedQuestion[]>()
-  for (const q of enriched) {
+  for (const q of active) {
     if (!groups.has(q.check_category)) groups.set(q.check_category, [])
     groups.get(q.check_category)!.push(q)
   }
 
   const lines: string[] = [
-    `== SA CHECKLIST — domain: ${agentDomain} (${enriched.length} questions) ==`,
+    `== SA CHECKLIST — domain: ${agentDomain} (${active.length} answered; ${naCount} N/A; ${notAttempted} not attempted — N/A and unattempted excluded) ==`,
     '',
     'INSTRUCTIONS FOR THIS SECTION:',
     '  • Generate ONE finding per check_category group, not one per question code.',
-    '  • mandatory_green: non_compliant or not_answered = BLOCKER regardless of evidence.',
-    '  • Blank evidence on non_compliant/partial = absent evidence; cite this explicitly.',
-    '  • not_answered = treat as non_compliant with no evidence.',
-    '  • compliant: only raise a finding if evidence reveals a concern.',
-    '  • na: skip unless hint_text says justification is needed.',
+    '  • mandatory_green: non_compliant = BLOCKER unless artifact evidence provides adequate mitigation.',
+    '  • Blank evidence on non_compliant/partial = absent evidence; cite WHAT is missing and WHY it matters.',
+    '  • compliant: raise a finding only if evidence reveals a genuine concern.',
+    '  • For categories with solid evidence, a GREEN finding (rag_score 4–5) is the correct output.',
     '',
   ]
 
   for (const [category, questions] of groups) {
     const isMandatory = questions.some(q => q.is_mandatory_green)
-    const flag = isMandatory ? '  ⚠ MANDATORY-GREEN — non_compliant = BLOCKER' : ''
+    const flag = isMandatory ? '  ⚠ MANDATORY-GREEN — non_compliant = BLOCKER (verify artifacts first)' : ''
     lines.push(`── check_category: ${category}${flag}`)
 
     for (const q of questions) {
@@ -152,11 +164,11 @@ export function formatChecklistBlock(
       lines.push(`           Answer:   ${formatAnswer(q.answer)}`)
       lines.push(`           Evidence: ${formatEvidence(q.answer, q.evidence)}${hint}`)
 
-      if (['non_compliant', 'partial', 'not_answered'].includes(q.answer)) {
+      if (['non_compliant', 'partial'].includes(q.answer)) {
         const sev = q.is_mandatory_green
-          ? 'BLOCKER  (mandatory-green rule)'
-          : q.blank_nc_severity.toUpperCase() + (q.evidence ? '' : '  (blank evidence)')
-        lines.push(`           → Raise ${sev} finding for ${category}`)
+          ? 'BLOCKER (mandatory-green rule — verify artifact evidence before concluding)'
+          : q.blank_nc_severity.toUpperCase() + (q.evidence ? '' : '  (blank evidence — treat as absent)')
+        lines.push(`           → Consider: ${sev} finding for ${category}`)
       }
     }
     lines.push('')
@@ -205,11 +217,11 @@ export function buildSolutionContextBlock(reportJson: any): string {
   const fd = reportJson?.form_data ?? {}
   return [
     '== SOLUTION CONTEXT ==',
-    `Solution Name:      ${fd.solution_name ?? fd.project_name ?? '(not provided)'}`,
-    `Problem Statement:  ${fd.problem_statement ?? '(not provided)'}`,
-    `Stakeholders:       ${(fd.stakeholders ?? []).join(', ') || '(not provided)'}`,
-    `Business Drivers:   ${(fd.business_drivers ?? []).join('; ') || '(not provided)'}`,
-    `Growth Plans:       ${fd.growth_plans ?? '(not provided)'}`,
+    `Solution Name:            ${fd.solution_name ?? fd.project_name ?? '(not provided)'}`,
+    `Problem Statement:        ${fd.problem_statement ?? '(not provided)'}`,
+    `Stakeholders:             ${(fd.stakeholders ?? []).join(', ') || '(not provided)'}`,
+    `Business Drivers:         ${(fd.business_drivers ?? []).join('; ') || '(not provided)'}`,
+    `Target Business Outcomes: ${fd.target_business_outcomes ?? fd.growth_plans ?? '(not provided)'}`,
   ].join('\n')
 }
 
@@ -272,9 +284,10 @@ const KB_CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutes
 export async function getKnowledgeBaseContent(
   supabase: SupabaseClient,
   categories: string[],
-  principleIds?: string[]
+  principleIds?: string[],
+  limit?: number
 ): Promise<string> {
-  const cacheKey = `${categories.join(',')}:${principleIds?.join(',') || 'all'}`
+  const cacheKey = `${categories.join(',')}:${principleIds?.join(',') || 'all'}:${limit || 'unlimited'}`
   const cached = kbCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.content
 
@@ -286,6 +299,10 @@ export async function getKnowledgeBaseContent(
 
   if (principleIds && principleIds.length > 0) {
     query = query.or(principleIds.map(id => `principle_id.eq.${id}`).join(','))
+  }
+
+  if (limit && limit > 0) {
+    query = query.limit(limit)
   }
 
   const { data, error } = await query.order('created_at', { ascending: true })
@@ -328,7 +345,7 @@ export function extractCheckCategories(
 
 export function getKbCategoriesForAgent(agentDomain: string): string[] {
   const map: Record<string, string[]> = {
-    general:      ['ea_principles', 'ea_standards'],
+    solution:     ['ea_principles', 'ea_standards'],
     business:     ['ea_principles', 'ea_standards'],
     application:  ['ea_principles', 'ea_standards'],
     software:     ['ea_principles', 'ea_standards'],

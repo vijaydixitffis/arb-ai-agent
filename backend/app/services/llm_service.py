@@ -14,15 +14,18 @@ import asyncio
 from typing import Dict, Any, Optional
 
 from app.core.config import settings
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 from google import genai
 from google.genai import types as genai_types
 
 logger = logging.getLogger(__name__)
 
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
 class LLMService:
-    """Unified LLM service — OpenAI or Gemini, configured via LLM_PROVIDER setting."""
+    """Unified LLM service — OpenAI, Gemini, or OpenRouter, configured via LLM_PROVIDER setting."""
 
     def __init__(self):
         self.provider = settings.LLM_PROVIDER.lower()
@@ -31,6 +34,19 @@ class LLMService:
             self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         elif self.provider == "gemini":
             self.gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        elif self.provider == "openrouter":
+            if not settings.OPENROUTER_API_KEY:
+                raise ValueError("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter")
+            self.openrouter_client = AsyncOpenAI(
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url=OPENROUTER_BASE_URL,
+            )
+            # Gemini fallback: used automatically when OpenRouter returns 429
+            if settings.GEMINI_API_KEY:
+                self.gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                self._has_gemini_fallback = True
+            else:
+                self._has_gemini_fallback = False
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
 
@@ -54,6 +70,8 @@ class LLMService:
                 coro = self._openai_completion(prompt, system_prompt, temperature, max_tokens)
             elif self.provider == "gemini":
                 coro = self._gemini_completion(prompt, system_prompt, temperature, max_tokens)
+            elif self.provider == "openrouter":
+                coro = self._openrouter_completion(prompt, system_prompt, temperature, max_tokens)
             else:
                 raise ValueError(f"Unsupported LLM provider: {self.provider}")
 
@@ -63,6 +81,24 @@ class LLMService:
 
         except asyncio.TimeoutError:
             raise RuntimeError(f"LLM request timed out after {timeout}s")
+        except RateLimitError as exc:
+            if self.provider == "openrouter" and self._has_gemini_fallback:
+                logger.warning(
+                    f"[LLM] OpenRouter 429 rate-limit — falling back to Gemini "
+                    f"(model={settings.GEMINI_MODEL})"
+                )
+                try:
+                    result = await asyncio.wait_for(
+                        self._gemini_completion(prompt, system_prompt, temperature, max_tokens),
+                        timeout=timeout,
+                    )
+                    logger.info(f"[LLM] Gemini fallback OK tokens_used={result.get('tokens_used', 0)}")
+                    return result
+                except Exception:
+                    logger.exception("[LLM] Gemini fallback also failed")
+                    raise
+            logger.exception("[LLM] generate_completion failed")
+            raise
         except Exception:
             logger.exception("[LLM] generate_completion failed")
             raise
@@ -70,15 +106,27 @@ class LLMService:
     @staticmethod
     def parse_json_from_llm(raw: str) -> Any:
         """Strip markdown code fences then parse JSON.
-        Works whether or not the LLM wraps its output in ```json ... ```.
+        Falls back to json_repair for truncated/malformed responses.
         """
         cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
         cleaned = re.sub(r"\s*```\s*$", "", cleaned.strip(), flags=re.MULTILINE)
-        return json.loads(cleaned.strip())
-
+        cleaned = cleaned.strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            try:
+                from json_repair import repair_json
+                return json.loads(repair_json(cleaned))
+            except Exception:
+                raise
+    
+    
     async def generate_embedding(self, text: str) -> list:
         if self.provider == "openai":
             return await self._openai_embedding(text)
+        elif self.provider == "openrouter":
+            # OpenRouter doesn't expose embeddings — fall back to Gemini if available
+            return await self._gemini_embedding(text)
         return await self._gemini_embedding(text)
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
@@ -116,6 +164,51 @@ class LLMService:
         )
         return response.data[0].embedding
 
+    # ── OpenRouter ────────────────────────────────────────────────────────────
+
+    async def _openrouter_completion(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: int,
+    ) -> Dict[str, Any]:
+        """Call OpenRouter (OpenAI-compatible) using the configured model."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        model = settings.OPENROUTER_MODEL
+        logger.info(f"[LLM-OPENROUTER] calling model={model}")
+
+        response = await self.openrouter_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            # JSON mode — not all OpenRouter models support response_format,
+            # but Gemma/Llama variants generally do.
+            response_format={"type": "json_object"},
+            extra_headers={
+                "HTTP-Referer": "https://arb-ai-agent.app",
+                "X-Title": "ARB AI Agent",
+            },
+        )
+        content = response.choices[0].message.content
+        if not content:
+            finish_reason = response.choices[0].finish_reason
+            raise ValueError(
+                f"OpenRouter returned null/empty content (model={model}, "
+                f"finish_reason={finish_reason}, tokens={response.usage.total_tokens if response.usage else 0})"
+            )
+        return {
+            "content": content,
+            "tokens_used": response.usage.total_tokens if response.usage else 0,
+            "model": model,
+            "provider": "openrouter",
+        }
+
     # ── Gemini ────────────────────────────────────────────────────────────────
 
     async def _gemini_completion(
@@ -150,7 +243,15 @@ class LLMService:
         if getattr(candidate, "finish_reason", None) == "SAFETY":
             raise RuntimeError("Gemini response blocked by safety filters")
 
-        content = response.text
+        # Handle multi-part responses (thought_signature, etc.)
+        if candidate and hasattr(candidate, 'content') and candidate.content:
+            # Extract only text parts, ignore thought_signature and other metadata
+            text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text')]
+            content = ''.join(text_parts)
+        else:
+            # Fallback to response.text for backward compatibility
+            content = response.text
+            
         if not content:
             raise ValueError("Gemini response has no content")
 

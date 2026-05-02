@@ -63,18 +63,30 @@ export default function ReviewStatus() {
     if (!reviewStatus) return <Clock className="w-8 h-8 text-gray-400" />
     
     switch (reviewStatus.status) {
+      case 'queued':
       case 'pending':
         return <Clock className="w-8 h-8 text-yellow-500 animate-pulse" />
+      case 'analysing':
       case 'in_review':
         return <Clock className="w-8 h-8 text-blue-500 animate-spin" />
+      case 'review_ready':
+        return <Clock className="w-8 h-8 text-blue-600" />
+      case 'ea_reviewing':
       case 'ea_review':
-        return <CheckCircle className="w-8 h-8 text-green-500" />
+        return <CheckCircle className="w-8 h-8 text-purple-500" />
       case 'approved':
         return <CheckCircle className="w-8 h-8 text-green-600" />
+      case 'conditionally_approved':
+        return <CheckCircle className="w-8 h-8 text-teal-600" />
+      case 'returned':
+      case 'rework':
+        return <AlertCircle className="w-8 h-8 text-amber-500" />
       case 'rejected':
         return <XCircle className="w-8 h-8 text-red-600" />
       case 'deferred':
         return <AlertCircle className="w-8 h-8 text-orange-500" />
+      case 'closed':
+        return <CheckCircle className="w-8 h-8 text-gray-500" />
       default:
         return <Clock className="w-8 h-8 text-gray-400" />
     }
@@ -84,18 +96,32 @@ export default function ReviewStatus() {
     if (!reviewStatus) return 'Loading...'
     
     switch (reviewStatus.status) {
+      case 'drafting':
+        return 'Draft — completing intake form'
+      case 'queued':
       case 'pending':
-        return 'Pending - Waiting to start'
+        return 'Queued — waiting for AI processing'
+      case 'analysing':
       case 'in_review':
-        return 'In Review - AI Agent is processing'
+        return 'Analysing — AI agent is reviewing'
+      case 'review_ready':
+        return 'Review Ready — awaiting EA to open dossier'
+      case 'ea_reviewing':
       case 'ea_review':
-        return 'EA Review - Ready for Enterprise Architect review'
+        return 'EA Reviewing — Gate 2 in progress'
       case 'approved':
         return 'Approved'
+      case 'conditionally_approved':
+        return 'Conditionally Approved — actions pending'
+      case 'returned':
+      case 'rework':
+        return 'Returned — SA rework required'
       case 'rejected':
         return 'Rejected'
       case 'deferred':
-        return 'Deferred'
+        return 'Deferred — submission must restart'
+      case 'closed':
+        return 'Closed — all actions resolved'
       default:
         return 'Unknown Status'
     }
@@ -103,12 +129,16 @@ export default function ReviewStatus() {
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case 'critical':
+      case 'blocker': case 'critical':
         return 'bg-red-100 text-red-800 border-red-200'
-      case 'major':
+      case 'high': case 'major':
         return 'bg-orange-100 text-orange-800 border-orange-200'
-      case 'minor':
+      case 'medium':
         return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      case 'low': case 'minor':
+        return 'bg-blue-50 text-blue-800 border-blue-200'
+      case 'info':
+        return 'bg-gray-100 text-gray-600 border-gray-200'
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200'
     }

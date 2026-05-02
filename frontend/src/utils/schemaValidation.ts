@@ -31,7 +31,7 @@ interface FormData {
 }
 
 const VALID_DOMAINS = [
-  'general', 'business', 'application', 'integration', 
+  'solution', 'business', 'application', 'integration',
   'data', 'infrastructure', 'devsecops', 'nfr'
 ]
 

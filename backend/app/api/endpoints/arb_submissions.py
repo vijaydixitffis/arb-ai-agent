@@ -21,7 +21,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Optio
         return None
     return payload.get("sub")
 
-@router.get("/")
+@router.get("")
 async def get_submissions(current_user: str = Depends(get_current_user)):
     """Get all ARB submissions"""
     if not current_user:
@@ -37,7 +37,7 @@ async def get_submission(submission_id: str, current_user: str = Depends(get_cur
         raise HTTPException(status_code=404, detail="Submission not found")
     return submissions_db[submission_id]
 
-@router.post("/")
+@router.post("")
 async def create_submission(submission: ARBSubmission, current_user: str = Depends(get_current_user)):
     """Create a new ARB submission"""
     if not current_user:

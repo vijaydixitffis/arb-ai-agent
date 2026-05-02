@@ -1,5 +1,7 @@
 import { apiRequest } from './api'
-import { artefactService, ArtefactResponse } from './artefactService'
+import { artefactService, type ArtefactResponse } from './artefactService'
+
+export type { ArtefactResponse } from './artefactService'
 
 export interface ReviewData {
   solution_name: string
@@ -13,7 +15,7 @@ export interface DraftData {
   scope_tags: string[]
   sa_user_id: string
   form_data?: any
-  status?: 'draft' | 'submitted' | 'ready_for_review'
+  status?: 'drafting' | 'queued' | 'returned' | 'draft' | 'submitted'
 }
 
 export interface ReviewResult {
@@ -25,7 +27,7 @@ export interface ReviewResult {
 
 export interface ReviewStatus {
   id: string
-  status: 'pending' | 'in_review' | 'submitted' | 'ea_review' | 'approved' | 'rejected' | 'deferred'
+  status: 'drafting' | 'queued' | 'analysing' | 'review_ready' | 'ea_reviewing' | 'returned' | 'approved' | 'conditionally_approved' | 'deferred' | 'rejected' | 'closed' | string
   decision: string | null
   report_json: any
   domain_scores: any[]
@@ -47,7 +49,7 @@ export const reviewService = {
         solution_name: data.solution_name,
         scope_tags: data.scope_tags,
         sa_user_id: data.sa_user_id,
-        status: 'draft',
+        status: 'drafting',
         report_json: { form_data: data.form_data }
       })
     })
@@ -118,7 +120,7 @@ export const reviewService = {
   async uploadArtifact(reviewId: string, file: File) {
     const result = await artefactService.uploadArtefact({
       review_id: reviewId,
-      domain_slug: 'general',
+      domain_slug: 'solution',
       artefact_name: file.name,
       artefact_type: file.type,
       file
@@ -292,7 +294,7 @@ export const reviewService = {
   extractScopeTags(formData: any, artefacts?: Record<string, any[]>): string[] {
     const tags: Set<string> = new Set()
     const VALID_DOMAINS = [
-      'general', 'business', 'application', 'integration', 
+      'solution', 'business', 'application', 'integration',
       'data', 'infrastructure', 'devsecops', 'nfr'
     ]
 
@@ -383,13 +385,13 @@ export const reviewService = {
 
     // Ensure at least one tag exists for AI review to run
     if (tags.size === 0) {
-      console.warn('No valid scope tags found, defaulting to "general"')
-      tags.add('general')
+      console.warn('No valid scope tags found, defaulting to "solution"')
+      tags.add('solution')
     }
 
     // Sort tags for consistency
     const sortedTags = Array.from(tags).sort()
-    
+
     // Log extraction summary for debugging
     console.log(`Scope tags extracted: [${sortedTags.join(', ')}] from:`, {
       domainDataDomains: Object.keys(formData.domain_data || {}),
@@ -404,8 +406,10 @@ export const reviewService = {
    * Get artifact download URL via Python backend
    */
   async getArtifactDownloadUrl(reviewId: string, fileName: string) {
-    // This should be implemented in Python backend
-    // For now, return a placeholder
     return `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/reviews/${reviewId}/artifact/${fileName}`
+  },
+
+  async deleteArtefact(artefactId: string, _reviewId?: string) {
+    return artefactService.deleteArtefact(artefactId)
   }
 }

@@ -239,10 +239,10 @@ export default function ARBSubmission() {
           scope_tags: scopeTags,
           sa_user_id: user?.id || '',
           form_data: completeFormData,
-          status: 'submitted'
+          status: 'queued'
         })
       } else {
-        // Create new review as submitted
+        // Create new review as queued
         const review = await reviewService.createDraft({
           solution_name: completeFormData.solution_name,
           scope_tags: scopeTags,
@@ -290,7 +290,7 @@ export default function ARBSubmission() {
           // Save as draft but don't submit
           await reviewService.updateDraft(reviewId!, {
             form_data: completeFormData,
-            status: 'draft'
+            status: 'drafting'
           })
           alert('Saved as draft. Please fix the validation errors before submitting.')
           return

@@ -3,6 +3,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { OrchestratorAgent } from "./agents/orchestrator.ts"
 import { extractTextFromArtifact } from "./utils/text-extraction.ts"
 
+// Map legacy/uppercase severity values to the normalised lowercase spec values
+function normaliseSeverity(s: string | undefined): string {
+  if (!s) return 'low'
+  const map: Record<string, string> = {
+    BLOCKER: 'blocker', HIGH: 'high', MEDIUM: 'medium', LOW: 'low', INFO: 'info',
+    critical: 'blocker', major: 'high', minor: 'low',
+  }
+  return map[s] ?? s.toLowerCase()
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -15,14 +25,27 @@ serve(async (req) => {
 
   // Declare outside try so the catch block can reference them for audit logging.
   let reviewId: string | undefined
+
+  // Supabase auto-injects SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in edge functions.
+  // PROJECT_URL / SERVICE_ROLE_KEY are kept as fallbacks for local dev overrides.
+  const supabaseUrl      = Deno.env.get('SUPABASE_URL')              ?? Deno.env.get('PROJECT_URL')      ?? ''
+  const serviceRoleKey   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY') ?? ''
+
+  // User-scoped client — respects RLS via caller's JWT (used only for the initial read
+  // so the gateway enforces "can this user trigger this review").
   const supabase = createClient(
-    Deno.env.get('PROJECT_URL') ?? '',
-    Deno.env.get('SERVICE_ROLE_KEY') ?? '',
-    {
-      global: {
-        headers: { Authorization: req.headers.get('Authorization') ?? '' }
-      }
-    }
+    supabaseUrl,
+    serviceRoleKey,
+    { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } }
+  )
+
+  // Admin client — authenticates as service_role, bypasses RLS entirely.
+  // No Authorization header override and no session persistence — ensures PostgREST
+  // sets role=service_role (BYPASSRLS) for all write operations.
+  const adminSupabase = createClient(
+    supabaseUrl,
+    serviceRoleKey,
+    { auth: { persistSession: false, autoRefreshToken: false } }
   )
 
   try {
@@ -44,15 +67,30 @@ serve(async (req) => {
       throw new Error(`Review not found: ${reviewError?.message}`)
     }
 
-    // Accept 'pending' or 'submitted' — frontend sets 'submitted' before triggering
-    if (!['pending', 'submitted'].includes(review.status)) {
-      throw new Error(`Review already processed: ${review.status}`)
+    // Accept intake-complete states that are ready for AI processing
+    if (!['queued', 'pending', 'submitted', 'returned'].includes(review.status)) {
+      throw new Error(`Review already processed or not ready: ${review.status}`)
     }
 
-    await supabase
+    await adminSupabase
       .from('reviews')
-      .update({ status: 'in_review', submitted_at: new Date().toISOString() })
+      .update({ status: 'analysing', submitted_at: new Date().toISOString() })
       .eq('id', reviewId)
+
+    // Pre-insert domain_reviews rows for progress tracking
+    const scopeDomains: string[] = review.scope_tags ?? []
+    if (scopeDomains.length > 0) {
+      const domainRows = scopeDomains.map((domain: string) => ({
+        review_id:    reviewId,
+        domain,
+        agent_status: 'waiting',
+        retry_count:  0,
+      }))
+      const { error: drErr } = await adminSupabase
+        .from('domain_reviews')
+        .upsert(domainRows, { onConflict: 'review_id,domain' })
+      if (drErr) console.warn(`domain_reviews pre-insert (non-fatal): ${drErr.message}`)
+    }
 
     console.log(`Review ${reviewId} status updated to in_review`)
 
@@ -84,7 +122,7 @@ serve(async (req) => {
       review,
       reportJson:   review.report_json,
       artifactText,
-      supabase,
+      supabase:     adminSupabase,  // admin client for KB/checklist reads — no RLS interference
       scopeTags:    review.scope_tags ?? [],
     })
 
@@ -93,117 +131,243 @@ serve(async (req) => {
 
     // ── STEP 4: Persist results ────────────────────────────────────────────────
 
-    // 4a. Update reviews table (fullReport already merges form_data + ai_review)
-    const { error: updateError } = await supabase
+    const now = new Date().toISOString()
+
+    // 4a. Update reviews table
+    const { error: updateError } = await adminSupabase
       .from('reviews')
       .update({
-        status:             'ea_review',
-        decision:           reviewResult.decision,
-        report_json:        reviewResult.fullReport,
-        tokens_used:        reviewResult.tokensUsed,
-        processing_time_ms: processingTime,
-        llm_raw_response:   reviewResult.rawResponse,
-        reviewed_at:        new Date().toISOString(),
+        status:                 'review_ready',
+        decision:               reviewResult.decision,
+        report_json:            reviewResult.fullReport,
+        tokens_used:            reviewResult.tokensUsed,
+        processing_time_ms:     processingTime,
+        llm_raw_response:       reviewResult.rawResponse,
+        reviewed_at:            now,
+        agent_run_at:           now,
+        aggregate_rag_score:    reviewResult.aggregateScore,
+        aggregate_rag_label:    reviewResult.aggregateRagLabel,
+        recommended_decision:   reviewResult.decision,
+        kb_sources_cited:       reviewResult.kbSourcesCited,
+        consolidated_blockers:  reviewResult.blockers,
+        consolidated_actions:   reviewResult.actions,
       })
       .eq('id', reviewId)
 
-    if (updateError) throw updateError
+    if (updateError) console.error(`reviews update (4a) failed (continuing): ${updateError.message}`)
 
-    // 4b. Domain scores (upsert to handle re-runs)
-    for (const [domain, score] of Object.entries(reviewResult.domainScores)) {
-      const { error: dsErr } = await supabase
+    // 4b. Domain scores — upsert with full DomainSummary fields
+    for (const [domain, summary] of Object.entries(reviewResult.domainSummaries)) {
+      const s = summary as any
+      const { error: dsErr } = await adminSupabase
         .from('domain_scores')
         .upsert(
-          { review_id: reviewId, domain, score },
+          {
+            review_id:              reviewId,
+            domain,
+            score:                  s.score,
+            rag_label:              s.rag_label,
+            overall_readiness:      s.overall_readiness    ?? null,
+            executive_summary:      s.executive_summary    ?? null,
+            compliant_areas:        s.compliant_areas      ?? [],
+            gap_areas:              s.gap_areas            ?? [],
+            blocker_count:          s.blocker_count        ?? 0,
+            action_count:           s.action_count         ?? 0,
+            adr_count:              s.adr_count            ?? 0,
+            domain_specific_scores: s.domain_specific_scores ?? null,
+            evidence_quality:       s.evidence_quality     ?? null,
+            kb_references:          s.kb_references        ?? [],
+            model_used:             s.model_used           ?? null,
+            generated_at:           now,
+          },
           { onConflict: 'review_id,domain' }
         )
       if (dsErr) console.error(`domain_scores upsert failed for ${domain}:`, dsErr.message)
     }
 
-    // 4c. Findings — delete old then insert fresh (avoids duplicates on re-run)
-    await supabase.from('findings').delete().eq('review_id', reviewId)
+    // 4c. Blockers — delete then insert fresh
+    await adminSupabase.from('blockers').delete().eq('review_id', reviewId)
+    if (reviewResult.blockers.length > 0) {
+      const { error: blkErr } = await adminSupabase
+        .from('blockers')
+        .insert(reviewResult.blockers.map(b => ({
+          review_id:          reviewId,
+          blocker_id:         b.blocker_id,
+          domain:             b.domain,
+          title:              b.title,
+          description:        b.description,
+          violated_standard:  b.violated_standard  ?? null,
+          impact:             b.impact             ?? null,
+          resolution_required: b.resolution_required,
+          links_to_finding_id: b.links_to_finding_id ?? null,
+          is_security_or_dr:  b.is_security_or_dr  ?? false,
+          status:             b.status             ?? 'OPEN',
+          kb_evidence_ref:    b.kb_evidence_ref    ?? [],
+        })))
+      if (blkErr) console.error('blockers insert failed:', blkErr.message)
+    }
+
+    // 4d. Recommendations — delete then insert fresh
+    await adminSupabase.from('recommendations').delete().eq('review_id', reviewId)
+    if (reviewResult.recommendations.length > 0) {
+      const { error: recErr } = await adminSupabase
+        .from('recommendations')
+        .insert(reviewResult.recommendations.map(r => ({
+          review_id:            reviewId,
+          recommendation_id:    r.recommendation_id,
+          domain:               r.domain,
+          priority:             r.priority             ?? 'MEDIUM',
+          title:                r.title                ?? null,
+          rationale:            r.rationale            ?? null,
+          approved_pattern_ref: r.approved_pattern_ref ?? null,
+          benefit:              r.benefit              ?? null,
+          implementation_hint:  r.implementation_hint  ?? null,
+          applies_to_finding_id: r.applies_to_finding_id ?? null,
+          applies_to_adr_id:    r.applies_to_adr_id    ?? null,
+          is_agent_generated:   true,
+          kb_source_ref:        r.kb_source_ref        ?? [],
+        })))
+      if (recErr) console.error('recommendations insert failed:', recErr.message)
+    }
+
+    // 4e. Findings — delete then insert fresh
+    await adminSupabase.from('findings').delete().eq('review_id', reviewId)
     if (reviewResult.findings.length > 0) {
-      const { error: findErr } = await supabase
+      const { error: findErr } = await adminSupabase
         .from('findings')
-        .insert(
-          reviewResult.findings.map(f => ({
-            review_id:      reviewId,
-            domain:         f.domain,
-            principle_id:   f.principle_id   || null,
-            severity:       f.severity,        // critical | major | minor (DB constraint)
-            finding:        f.finding,
-            recommendation: f.recommendation || null,
-            is_resolved:    false,
-          }))
-        )
+        .insert(reviewResult.findings.map((f: any) => ({
+          review_id:           reviewId,
+          domain:              f.domain,
+          principle_id:        f.principle_id        || null,
+          finding_id:          f.finding_id          || null,
+          severity:            normaliseSeverity(f.severity),
+          finding:             f.finding,
+          recommendation:      f.recommendation      || null,
+          check_category:      f.check_category      || null,
+          is_resolved:         false,
+          title:               f.title               ?? null,
+          rag_score:           f.rag_score            ?? null,
+          evidence_source:     f.evidence_source      ?? null,
+          standard_violated:   f.standard_violated    ?? null,
+          impact:              f.impact               ?? null,
+          is_blocker:          f.is_blocker           ?? false,
+          links_to_action_ids: f.links_to_action_ids  ?? [],
+          links_to_adr_id:     f.links_to_adr_id      ?? null,
+          waiver_eligible:     f.waiver_eligible       ?? false,
+          kb_reference:        f.kb_reference          ?? [],
+          artifact_ref:        f.artifact_ref          ?? null,
+          kb_ref:              f.kb_ref                ?? null,
+        })))
       if (findErr) console.error('findings insert failed:', findErr.message)
     }
 
-    // 4d. ADRs
+    // 4f. ADRs — delete then insert fresh
+    await adminSupabase.from('adrs').delete().eq('review_id', reviewId)
     if (reviewResult.adrs.length > 0) {
-      const { error: adrErr } = await supabase
+      const { error: adrErr } = await adminSupabase
         .from('adrs')
-        .insert(
-          reviewResult.adrs.map((adr, i) => {
-            const adrId = adr.id || `ADR-${reviewId.slice(0, 8)}-${String(i + 1).padStart(3, '0')}`
-            const consequences = (adr.type === 'WAIVER' && adr.waiver_expiry_date)
-              ? `waiver_expiry_date: ${adr.waiver_expiry_date}`
-              : null
-            return {
-              review_id:    reviewId,
-              adr_id:       adrId,
-              decision:     adr.decision,
-              rationale:    adr.rationale,
-              context:      adr.context      ?? null,
-              consequences: consequences,
-              owner:        adr.owner        ?? null,
-              target_date:  adr.target_date  ?? null,
-              status:       'proposed',       // DB constraint: proposed | accepted | rejected | superseded
-            }
-          })
-        )
+        .insert(reviewResult.adrs.map((adr: any, i: number) => ({
+          review_id:            reviewId,
+          adr_id:               adr.id || `ADR-${reviewId.slice(0, 8)}-${String(i + 1).padStart(3, '0')}`,
+          decision:             adr.decision,
+          rationale:            adr.rationale,
+          context:              adr.context              ?? null,
+          consequences:         adr.consequences         ?? null,
+          owner:                adr.owner                ?? null,
+          target_date:          adr.target_date          ?? null,
+          status:               'proposed',
+          domain:               adr.domain               ?? null,
+          adr_type:             adr.adr_type             ?? adr.type ?? null,
+          title:                adr.title                ?? null,
+          options_considered:   adr.options_considered   ?? null,
+          mitigations:          adr.mitigations          ?? [],
+          proposed_owner:       adr.proposed_owner       ?? adr.owner ?? null,
+          proposed_target_date: adr.proposed_target_date ?? adr.target_date ?? null,
+          waiver_expiry_date:   adr.waiver_expiry_date   ?? null,
+          links_to_finding_ids: adr.links_to_finding_ids ?? [],
+          links_to_action_ids:  adr.links_to_action_ids  ?? [],
+          kb_references:        adr.kb_references        ?? [],
+        })))
       if (adrErr) console.error('adrs insert failed:', adrErr.message)
     }
 
-    // 4e. Actions
+    // 4g. Actions — delete then insert fresh
+    await adminSupabase.from('actions').delete().eq('review_id', reviewId)
     if (reviewResult.actions.length > 0) {
-      const { error: actErr } = await supabase
+      const { error: actErr } = await adminSupabase
         .from('actions')
-        .insert(
-          reviewResult.actions.map(action => {
-            const dueDays = action.due_days != null ? parseInt(String(action.due_days), 10) || null : null
-            const dueDate = dueDays
-              ? new Date(Date.now() + dueDays * 86_400_000).toISOString().split('T')[0]
-              : null
-            return {
-              review_id:   reviewId,
-              action_text: action.action,
-              owner_role:  action.owner_role,
-              due_days:    dueDays,
-              due_date:    dueDate,
-              status:      'open',            // DB constraint: open | in_progress | completed | blocked
-            }
-          })
-        )
+        .insert(reviewResult.actions.map((action: any) => {
+          const dueDays = action.due_days != null ? parseInt(String(action.due_days), 10) || null : null
+          const dueDate = dueDays
+            ? new Date(Date.now() + dueDays * 86_400_000).toISOString().split('T')[0]
+            : action.proposed_due_date ?? null
+          return {
+            review_id:                   reviewId,
+            action_text:                 action.action,
+            owner_role:                  action.owner_role    ?? null,
+            due_days:                    dueDays,
+            due_date:                    dueDate,
+            status:                      'open',
+            action_id:                   action.action_id     ?? action.id ?? null,
+            domain:                      action.domain        ?? null,
+            action_type:                 action.action_type   ?? null,
+            title:                       action.title         ?? null,
+            proposed_owner:              action.proposed_owner ?? action.owner_role ?? null,
+            proposed_due_date:           action.proposed_due_date ?? null,
+            verification_method:         action.verification_method ?? null,
+            is_conditional_approval_gate: action.is_conditional_approval_gate ?? false,
+            links_to_finding_id:         action.links_to_finding_id ?? action.finding_ref ?? null,
+            links_to_blocker_id:         action.links_to_blocker_id ?? null,
+            links_to_adr_id:             action.links_to_adr_id     ?? null,
+            priority:                    action.priority            ?? null,
+          }
+        }))
       if (actErr) console.error('actions insert failed:', actErr.message)
     }
 
-    // 4f. Audit log
-    await supabase.from('audit_log').insert({
+    // 4h. NFR Scorecard — upsert per category
+    for (const nfr of reviewResult.nfrScorecard) {
+      const { error: nfrErr } = await adminSupabase
+        .from('nfr_scorecard')
+        .upsert(
+          {
+            review_id:           reviewId,
+            nfr_category:        nfr.nfr_category,
+            rag_score:           nfr.rag_score,
+            rag_label:           nfr.rag_label           ?? null,
+            evidence_provided:   nfr.evidence_provided   ?? [],
+            gaps:                nfr.gaps                ?? [],
+            mitigating_condition: nfr.mitigating_condition ?? null,
+            slo_target:          nfr.slo_target           ?? null,
+            actual_evidenced:    nfr.actual_evidenced      ?? null,
+            is_mandatory_green:  nfr.is_mandatory_green   ?? false,
+          },
+          { onConflict: 'review_id,nfr_category' }
+        )
+      if (nfrErr) console.error(`nfr_scorecard upsert failed for ${nfr.nfr_category}:`, nfrErr.message)
+    }
+
+    // 4i. Audit log
+    const { error: auditErr } = await adminSupabase.from('audit_log').insert({
       review_id: reviewId,
       user_id:   null,
       user_role: 'system',
       action:    'llm_processed',
       metadata: {
-        tokens_used:       reviewResult.tokensUsed,
-        processing_time_ms: processingTime,
-        model:             review.llm_model || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite',
-        domains_reviewed:  review.scope_tags,
-        findings_count:    reviewResult.findings.length,
-        adrs_count:        reviewResult.adrs.length,
-        actions_count:     reviewResult.actions.length,
+        tokens_used:         reviewResult.tokensUsed,
+        processing_time_ms:  processingTime,
+        model:               review.llm_model || Deno.env.get('OPENROUTER_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite',
+        domains_reviewed:    review.scope_tags,
+        findings_count:      reviewResult.findings.length,
+        blockers_count:      reviewResult.blockers.length,
+        adrs_count:          reviewResult.adrs.length,
+        actions_count:       reviewResult.actions.length,
+        recommendations_count: reviewResult.recommendations.length,
+        nfr_scorecard_count: reviewResult.nfrScorecard.length,
+        aggregate_rag_label: reviewResult.aggregateRagLabel,
       },
     })
+    if (auditErr) console.error(`audit_log insert failed (non-fatal): ${auditErr.message}`)
 
     console.log(`Review ${reviewId} processing completed successfully`)
 
@@ -222,7 +386,7 @@ serve(async (req) => {
 
     if (reviewId) {
       try {
-        await supabase.from('audit_log').insert({
+        await adminSupabase.from('audit_log').insert({
           review_id: reviewId,
           user_id:   null,
           user_role: 'system',

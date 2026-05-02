@@ -1,11 +1,24 @@
-// Severity values must match the DB constraint: ('critical', 'major', 'minor')
 export interface Finding {
   domain: string
   principle_id: string
-  severity: 'critical' | 'major' | 'minor'
+  finding_id?: string
+  severity: 'BLOCKER' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO' | 'critical' | 'major' | 'minor'
   finding: string
   recommendation: string
   check_category?: string
+  // extended fields (migration 022)
+  title?: string | null
+  rag_score?: number
+  evidence_source?: string | null
+  standard_violated?: string | null
+  impact?: string | null
+  is_blocker?: boolean
+  links_to_action_ids?: string[]
+  links_to_adr_id?: string | null
+  waiver_eligible?: boolean
+  kb_reference?: string[]
+  artifact_ref?: string | null
+  kb_ref?: string | null
 }
 
 export interface DomainResult {

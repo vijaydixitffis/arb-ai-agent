@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 # Delay between sequential domain LLM calls — stays within 15 RPM free-tier limit.
 INTER_DOMAIN_DELAY_S = 0.5
 
-# Delays (seconds) between retry attempts on transient LLM errors (503, timeout, etc.)
-# Two retries: wait 5s then 15s before giving up.
-LLM_RETRY_DELAYS_S = [5, 15]
+# One retry on transient LLM errors (503, timeout, etc.), 10 s delay.
+# Retry (attempt 2) reduces KB + artefact content by 25% to stay under token limits.
+LLM_CONTENT_SCALE_ON_SECOND_RETRY = 0.75
 
 
 class EnhancedARBOrchestrator:
@@ -69,6 +69,15 @@ class EnhancedARBOrchestrator:
                 **self._get_domain_metadata(domain_slug),
                 "solution_name": review.solution_name,
             }
+            # For solution domain, pass full project info so the LLM can assess it
+            if domain_slug == "solution":
+                fd = (review.report_json or {}).get("form_data", {})
+                domain_checklist["domain_metadata"].update({
+                    "problem_statement":        fd.get("problem_statement", ""),
+                    "business_drivers":         fd.get("business_drivers", []),
+                    "stakeholders":             fd.get("stakeholders", []),
+                    "target_business_outcomes": fd.get("growth_plans") or fd.get("target_business_outcomes", ""),
+                })
             try:
                 payload = await self._call_domain_with_retry(
                     review_id=review_id,
@@ -127,51 +136,92 @@ class EnhancedARBOrchestrator:
             total_tokens += payload.get("tokens_used", 0)
 
         scores = list(domain_scores.values())
-        aggregate_score = round(sum(scores) / len(scores)) if scores else 3
-        decision        = self._determine_decision(aggregate_score, all_findings, all_blockers, domain_scores)
+
+        # Spec-correct aggregate: min of all domain scores,
+        # overridden to RED(1) if any Security/DR blocker exists.
+        has_security_dr_blocker = any(
+            b.get("is_security_or_dr") for b in all_blockers
+        )
+        if has_security_dr_blocker:
+            aggregate_score = 1
+        else:
+            aggregate_score = min(scores) if scores else 3
+
+        aggregate_rag_label = self._score_to_label(aggregate_score)
+        decision            = self._determine_decision(aggregate_score, all_findings, all_blockers, domain_scores)
+
+        # Collect kb_sources from all domain payloads
+        kb_sources: List[str] = []
+        for entry in domain_payloads:
+            src = entry["payload"].get("summary", {}).get("kb_references") or []
+            kb_sources.extend(src)
+        kb_sources = list(dict.fromkeys(kb_sources))  # deduplicate, preserve order
+
+        # Extract nfr_scorecard rows emitted by the NFR domain agent
+        all_nfr_scorecard: List[Dict[str, Any]] = []
+        for entry in domain_payloads:
+            rows = entry["payload"].get("nfr_scorecard") or []
+            all_nfr_scorecard.extend(rows)
+
+        # Extract per-domain summaries (full DomainSummary objects)
+        domain_summaries: Dict[str, Any] = {}
+        for entry in domain_payloads:
+            slug    = entry["domain_slug"]
+            payload = entry["payload"]
+            summary = dict(payload.get("summary", {}))
+            summary["domain"] = slug
+            domain_summaries[slug] = summary
 
         total_duration_s = time.time() - t0
         logger.info(
-            f"[ORCHESTRATOR] Done — decision={decision} agg={aggregate_score} "
+            f"[ORCHESTRATOR] Done — decision={decision} agg={aggregate_score}({aggregate_rag_label}) "
             f"findings={len(all_findings)} blockers={len(all_blockers)} "
             f"actions={len(all_actions)} adrs={len(all_adrs)} tokens={total_tokens} "
             f"duration={total_duration_s:.2f}s"
         )
 
-        # ── Process NFR Criteria ───────────────────────────────────────────────
+        # ── Process NFR Criteria (form-based, for backward compat) ────────────
         nfr_analysis = self._process_nfr_criteria(review, domain_scores)
-        
+
         # ── Build fullReport (merges into existing report_json) ───────────────
         existing_report_json = review.report_json or {}
         ai_review = {
-            "decision":         decision,
-            "aggregate_score":  aggregate_score,
-            "domain_scores":    domain_scores,
-            "findings":         all_findings,
-            "blockers":         all_blockers,
-            "recommendations":  all_recommendations,
-            "actions":          all_actions,
-            "adrs":             all_adrs,
-            "nfr_analysis":     nfr_analysis,
-            "processed_at":     datetime.now(timezone.utc).isoformat(),
+            "decision":             decision,
+            "aggregate_score":      aggregate_score,
+            "aggregate_rag_label":  aggregate_rag_label,
+            "domain_scores":        domain_scores,
+            "domain_summaries":     domain_summaries,
+            "findings":             all_findings,
+            "blockers":             all_blockers,
+            "recommendations":      all_recommendations,
+            "actions":              all_actions,
+            "adrs":                 all_adrs,
+            "nfr_scorecard":        all_nfr_scorecard,
+            "nfr_analysis":         nfr_analysis,
+            "kb_sources_cited":     kb_sources,
+            "processed_at":         datetime.now(timezone.utc).isoformat(),
         }
 
         return {
-            **existing_report_json,          # preserves form_data + any prior keys
-            "ai_review":    ai_review,
-            # Convenience top-level keys for the agent endpoint to read:
-            "decision":         decision,
-            "aggregate_score":  aggregate_score,
-            "domain_scores":    domain_scores,
-            "findings":         all_findings,
-            "blockers":         all_blockers,
-            "recommendations":  all_recommendations,
-            "actions":          all_actions,
-            "adrs":             all_adrs,
-            "total_tokens_used": total_tokens,
+            **existing_report_json,
+            "ai_review":              ai_review,
+            "decision":               decision,
+            "aggregate_score":        aggregate_score,
+            "aggregate_rag_label":    aggregate_rag_label,
+            "recommended_decision":   decision,
+            "domain_scores":          domain_scores,
+            "domain_summaries":       domain_summaries,
+            "findings":               all_findings,
+            "blockers":               all_blockers,
+            "recommendations":        all_recommendations,
+            "actions":                all_actions,
+            "adrs":                   all_adrs,
+            "nfr_scorecard":          all_nfr_scorecard,
+            "kb_sources_cited":       kb_sources,
+            "total_tokens_used":      total_tokens,
             "processing_time_seconds": total_duration_s,
-            "domains_evaluated": domains,
-            "domain_payloads": [e["payload"] for e in domain_payloads],
+            "domains_evaluated":      domains,
+            "domain_payloads":        [e["payload"] for e in domain_payloads],
         }
 
     # ── Checklist preparation ─────────────────────────────────────────────────
@@ -323,12 +373,13 @@ class EnhancedARBOrchestrator:
         domain_slug: str,
         domain_checklist: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Call validate_domain with retries on transient errors.
+        """Call validate_domain with 1 retry, 10 s apart.
 
-        Attempt 1 is immediate. On failure, waits LLM_RETRY_DELAYS_S[i] seconds
-        before each subsequent attempt. Raises the last exception if all fail.
+        Attempt 1 — full content.
+        Attempt 2 (retry, 10 s) — KB + artefact content reduced by 25 %
+                                 to stay within LLM token limits.
         """
-        delays = [0] + LLM_RETRY_DELAYS_S  # [0, 5, 15] → 3 total attempts
+        delays = [0, 10]  # 2 total attempts
         last_exc: Exception = RuntimeError("no attempts made")
         for attempt, delay in enumerate(delays, start=1):
             if delay > 0:
@@ -337,11 +388,19 @@ class EnhancedARBOrchestrator:
                     f"retrying in {delay}s after: {last_exc}"
                 )
                 await asyncio.sleep(delay)
+            # Reduce content on the second attempt (retry)
+            content_scale = LLM_CONTENT_SCALE_ON_SECOND_RETRY if attempt == 2 else 1.0
+            if content_scale < 1.0:
+                logger.info(
+                    f"[ORCHESTRATOR] {domain_slug} attempt {attempt} — "
+                    f"reducing KB/artefact content to {int(content_scale * 100)}%"
+                )
             try:
                 return await self.domain_agent.validate_domain(
                     review_id=review_id,
                     domain_slug=domain_slug,
                     checklist_data=domain_checklist,
+                    content_scale=content_scale,
                 )
             except Exception as exc:
                 last_exc = exc
@@ -359,10 +418,17 @@ class EnhancedARBOrchestrator:
         for tag in scope_tags:
             if tag in active and tag not in ordered:
                 ordered.append(tag)
-        # Always include general if available
-        if "general" in active and "general" not in ordered:
-            ordered.insert(0, "general")
+        # Always include solution domain first if available
+        if "solution" in active and "solution" not in ordered:
+            ordered.insert(0, "solution")
         return ordered
+
+    def _score_to_label(self, score: int) -> str:
+        if score >= 4:
+            return "green"
+        if score == 3:
+            return "amber"
+        return "red"
 
     def _get_domain_metadata(self, domain_slug: str) -> Dict[str, Any]:
         from app.db.metadata_models import Domain
@@ -382,19 +448,18 @@ class EnhancedARBOrchestrator:
         blockers: List[Dict[str, Any]],
         domain_scores: Dict[str, int],
     ) -> str:
-        """Map rag_scores and blockers to a DB-compatible decision string."""
-        blocker_count = len(blockers) + sum(
-            1 for f in findings if f.get("rag_score", 5) <= 1
-        )
-        major_count = sum(1 for f in findings if f.get("rag_score", 5) == 2)
+        """Spec-correct decision logic matching the orchestrator aggregation rules."""
+        has_security_dr_blocker = any(b.get("is_security_or_dr") for b in blockers)
+        blocker_count = len(blockers)
 
-        security_score = domain_scores.get("security", domain_scores.get("infrastructure", 5))
-        nfr_score      = domain_scores.get("nfr", 5)
-
-        if blocker_count > 0 or security_score < 3 or nfr_score < 3:
+        # Score 5 or 4 → APPROVE (minor tracked actions only)
+        if aggregate_score >= 4 and blocker_count == 0:
+            return "approve"
+        # Score 1 with Security/DR blocker → REJECT
+        if aggregate_score <= 1 and has_security_dr_blocker:
             return "reject"
-        if major_count >= 3:
+        # Score 1 other blocker → DEFER
+        if aggregate_score <= 1 or blocker_count > 0:
             return "defer"
-        if major_count >= 1 or aggregate_score < 4:
-            return "approve_with_conditions"
-        return "approve"
+        # Score 2 or 3 → APPROVE_WITH_CONDITIONS
+        return "approve_with_conditions"

@@ -33,7 +33,8 @@ export type {
   ReviewData,
   DraftData,
   ReviewResult,
-  ReviewStatus
+  ReviewStatus,
+  ArtefactResponse,
 } from './supabase/reviewService'
 
 // Unified metadata service

@@ -203,9 +203,9 @@ export const supabaseService = {
     const reviewData = {
       ...data,
       created_at: new Date().toISOString(),
-      status: 'draft'
+      status: 'drafting'
     }
-    
+
     return await this.insert('reviews', reviewData)
   }
 }

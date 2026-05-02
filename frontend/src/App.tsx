@@ -4,6 +4,7 @@ import { useAuthStore, initializeSession } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import ARBSubmission from './pages/ARBSubmission'
+import EARRSubmission from './pages/EARRSubmission'
 import ReviewDashboard from './pages/ReviewDashboard'
 import ReviewStatus from './pages/ReviewStatus'
 import Layout from './components/layout/Layout'
@@ -60,6 +61,16 @@ function App() {
           <Route path="submission/new" element={
             <ProtectedRoute>
               <ARBSubmission />
+            </ProtectedRoute>
+          } />
+          <Route path="earr/new" element={
+            <ProtectedRoute>
+              <EARRSubmission />
+            </ProtectedRoute>
+          } />
+          <Route path="earr/edit/:reviewId" element={
+            <ProtectedRoute>
+              <EARRSubmission />
             </ProtectedRoute>
           } />
           <Route path="review/:submissionId" element={

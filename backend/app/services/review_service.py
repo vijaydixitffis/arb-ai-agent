@@ -45,7 +45,7 @@ class ReviewService:
             sa_user_id=uuid.UUID(review_data.get('sa_user_id')) if review_data.get('sa_user_id') else None,
             solution_name=review_data.get('solution_name'),
             scope_tags=review_data.get('scope_tags', []),
-            status=review_data.get('status', 'draft'),
+            status=self._STATUS_MAP.get(review_data.get('status', 'drafting'), review_data.get('status', 'drafting')),
             report_json=review_data.get('report_json')
         )
         self.db.add(review)
@@ -53,17 +53,35 @@ class ReviewService:
         self.db.refresh(review)
         return review
 
+    # Frontend / legacy values that don't match the DB CHECK constraint
+    _STATUS_MAP = {
+        'submitted': 'queued',
+        'draft':     'drafting',
+        'pending':   'queued',
+    }
+
     def update_review(self, review_id: str, review_data: dict) -> Optional[Review]:
         """Update an existing review"""
         try:
             review = self.db.query(Review).filter(Review.id == uuid.UUID(review_id)).first()
             if not review:
                 return None
-            
+
+            if 'status' in review_data and review_data['status'] is not None:
+                review_data = {**review_data,
+                               'status': self._STATUS_MAP.get(review_data['status'],
+                                                               review_data['status'])}
+
             for key, value in review_data.items():
-                if key == 'form_data' and value is not None:
+                if key == 'form_data':
                     existing = review.report_json or {}
-                    review.report_json = {**existing, "form_data": value}
+                    # Handle both None and empty objects
+                    if value is not None and value != {}:
+                        review.report_json = {**existing, "form_data": value}
+                    elif value and not existing.get("form_data"):
+                        # Merge with existing form_data if it exists
+                        merged_form_data = {**existing.get("form_data", {}), **value}
+                        review.report_json = {**existing, "form_data": merged_form_data}
                 elif hasattr(review, key) and value is not None:
                     setattr(review, key, value)
             self.db.commit()
@@ -84,7 +102,7 @@ class ReviewService:
             if not artefacts:
                 raise ValueError("Cannot submit review without artefacts")
             
-            review.status = 'submitted'
+            review.status = 'queued'
             review.submitted_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(review)
@@ -167,7 +185,7 @@ class ReviewService:
     def extract_scope_tags(self, review_data: Dict[str, Any]) -> List[str]:
         """Extract scope tags from review data (aligned with frontend logic)"""
         VALID_DOMAINS = [
-            'general', 'business', 'application', 'integration', 
+            'solution', 'business', 'application', 'integration',
             'data', 'infrastructure', 'devsecops', 'nfr'
         ]
         
@@ -226,9 +244,9 @@ class ReviewService:
                 if tag in VALID_DOMAINS:
                     scope_tags.add(tag)
         
-        # Ensure at least one tag exists (default to 'general')
+        # Ensure at least one tag exists (default to 'solution')
         if len(scope_tags) == 0:
-            scope_tags.add("general")
+            scope_tags.add("solution")
         
         # Return sorted list for consistency
         return sorted(list(scope_tags))

@@ -1,0 +1,772 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-sans);font-size:13px;color:var(--color-text-primary)}
+.wrap{padding:.75rem 0 2rem}
+.tabs{display:flex;gap:2px;margin-bottom:1.25rem;border-bottom:.5px solid var(--color-border-tertiary);overflow-x:auto}
+.tb{font-size:12px;padding:5px 11px;border-radius:6px 6px 0 0;cursor:pointer;border:none;background:transparent;color:var(--color-text-secondary);font-family:var(--font-sans);white-space:nowrap}
+.tb.on{background:var(--color-background-primary);color:var(--color-text-primary);font-weight:500;border:.5px solid var(--color-border-tertiary);border-bottom:.5px solid var(--color-background-primary);margin-bottom:-.5px}
+.tb:hover:not(.on){background:var(--color-background-secondary)}
+.view{display:none}.view.on{display:block}
+.sec{font-size:11px;font-weight:500;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;margin:1.5rem 0 .75rem;display:flex;align-items:center;gap:8px}
+.sec::after{content:'';flex:1;height:.5px;background:var(--color-border-tertiary)}
+.card{background:var(--color-background-primary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:.875rem}
+.ch{display:flex;align-items:center;gap:8px;padding:.625rem .875rem;border-bottom:.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+.ch .lbl{font-size:13px;font-weight:500;flex:1}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{padding:6px 10px;text-align:left;font-size:10.5px;font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);border-bottom:.5px solid var(--color-border-tertiary);white-space:nowrap}
+td{padding:7px 10px;border-bottom:.5px solid var(--color-border-tertiary);vertical-align:top;line-height:1.55}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--color-background-secondary)}
+.mono{font-family:var(--font-mono);font-size:10.5px}
+.badge{font-size:10px;padding:2px 7px;border-radius:999px;font-weight:500;white-space:nowrap;display:inline-block}
+.b-blue{background:var(--color-background-info);color:var(--color-text-info)}
+.b-green{background:var(--color-background-success);color:var(--color-text-success)}
+.b-amber{background:var(--color-background-warning);color:var(--color-text-warning)}
+.b-red{background:var(--color-background-danger);color:var(--color-text-danger)}
+.b-gray{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+.b-purple{background:#EEEDFE;color:#3C3489}
+.note{border-radius:var(--border-radius-md);padding:.625rem .875rem;font-size:12px;line-height:1.6;margin-bottom:.875rem;border:.5px solid}
+.n-blue{background:var(--color-background-info);border-color:var(--color-border-info);color:var(--color-text-info)}
+.n-green{background:var(--color-background-success);border-color:var(--color-border-success);color:var(--color-text-success)}
+.n-amber{background:var(--color-background-warning);border-color:var(--color-border-warning);color:var(--color-text-warning)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:.875rem}
+@media(max-width:540px){.g2{grid-template-columns:1fr}}
+
+/* ── Flow diagram ── */
+.phase{border-left:2px solid var(--color-border-tertiary);margin-left:40px;padding-left:16px;position:relative;margin-bottom:0}
+.phase::before{content:attr(data-label);position:absolute;left:-42px;top:0;width:80px;font-size:9.5px;font-weight:500;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-secondary);text-align:right;padding-right:8px;line-height:1.3;margin-top:14px}
+.phase-inner{padding:8px 0 16px}
+.states-row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:6px}
+.st{border-radius:var(--border-radius-md);border:.5px solid;padding:8px 11px;min-width:130px;max-width:190px;cursor:pointer;transition:box-shadow .15s}
+.st:hover{box-shadow:0 0 0 2px var(--color-border-secondary)}
+.st .s-chip{font-family:var(--font-mono);font-size:9.5px;font-weight:500;margin-bottom:3px;padding:1px 5px;border-radius:3px;display:inline-block}
+.st .s-title{font-size:12px;font-weight:500;line-height:1.35;margin-bottom:2px}
+.st .s-who{font-size:10.5px;color:var(--color-text-secondary);line-height:1.35}
+.st .s-sla{font-size:10px;margin-top:5px;display:flex;align-items:center;gap:3px;color:var(--color-text-secondary)}
+
+/* SA states */
+.s-sa{background:var(--color-background-success);border-color:#639922}
+.s-sa .s-chip{background:#EAF3DE;color:#3B6D11}
+/* System states */
+.s-sys{background:var(--color-background-secondary);border-color:var(--color-border-secondary)}
+.s-sys .s-chip{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+/* Agent states */
+.s-ag{background:#EEEDFE;border-color:#7F77DD}
+.s-ag .s-chip{background:#EEEDFE;color:#534AB7}
+/* EA states */
+.s-ea{background:#FAEEDA;border-color:#EF9F27}
+.s-ea .s-chip{background:#FAEEDA;color:#854F0B}
+/* Terminal */
+.s-done{background:var(--color-background-secondary);border-color:var(--color-border-tertiary)}
+.s-done .s-chip{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+/* Gate */
+.s-gate{background:var(--color-background-danger);border-color:#E24B4A;border-width:1.5px}
+.s-gate .s-chip{background:#FCEBEB;color:#A32D2D}
+.s-gate .s-title{color:#501313}
+
+.arrow-between{display:flex;align-items:center;gap:0;margin:2px 0 2px 0}
+.arr-line{flex:1;height:.5px;background:var(--color-border-secondary);max-width:200px}
+.arr-lbl{font-size:10px;color:var(--color-text-secondary);padding:0 6px;white-space:nowrap}
+.arr-head{width:0;height:0;border-top:3px solid transparent;border-bottom:3px solid transparent;border-left:4px solid var(--color-border-secondary)}
+
+.loop-note{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border-radius:var(--border-radius-md);border:.5px dashed var(--color-border-secondary);margin:4px 0;font-size:11px;color:var(--color-text-secondary)}
+
+.detail-pane{display:none;border-top:.5px solid var(--color-border-tertiary);margin-top:8px;padding-top:8px;font-size:11.5px;line-height:1.6}
+.detail-pane.open{display:block}
+.dp-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+@media(max-width:480px){.dp-grid{grid-template-columns:1fr}}
+.dp-block{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:8px 10px}
+.dp-label{font-size:9.5px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-secondary);margin-bottom:5px}
+.dp-block li{margin-left:14px;margin-bottom:2px;color:var(--color-text-secondary)}
+.dp-block p{color:var(--color-text-secondary);font-size:11.5px;line-height:1.5}
+
+/* Comparison table */
+.comp-del{background:var(--color-background-danger)}.comp-del td{color:var(--color-text-danger);text-decoration:line-through}
+.comp-add{background:var(--color-background-success)}.comp-add td:first-child{font-weight:500}
+.comp-mod{background:var(--color-background-warning)}
+</style>
+
+<div class="wrap">
+<div class="tabs">
+  <button class="tb on" onclick="sw('flow',this)">Optimised workflow</button>
+  <button class="tb" onclick="sw('names',this)">Status names</button>
+  <button class="tb" onclick="sw('ux',this)">UX improvements</button>
+  <button class="tb" onclick="sw('compare',this)">Before vs after</button>
+  <button class="tb" onclick="sw('ddl',this)">DDL changes</button>
+</div>
+
+<!-- ══════════════════ FLOW ══════════════════ -->
+<div id="flow" class="view on">
+
+<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem;font-size:11.5px">
+  <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#EAF3DE;border:.5px solid #639922;display:inline-block"></span>Solution Architect</span>
+  <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#F1EFE8;border:.5px solid #888780;display:inline-block"></span>System (automated)</span>
+  <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#EEEDFE;border:.5px solid #7F77DD;display:inline-block"></span>AI agents</span>
+  <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#FAEEDA;border:.5px solid #EF9F27;display:inline-block"></span>Enterprise Architect</span>
+  <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#FCEBEB;border:1.5px solid #E24B4A;display:inline-block"></span>Human gate (blocking)</span>
+  <span style="margin-left:auto;font-size:11px;color:var(--color-text-secondary)">Click any state to expand</span>
+</div>
+
+<!-- ── PHASE 1: SA INTAKE ── -->
+<div class="phase" data-label="Intake">
+<div class="phase-inner">
+  <div class="states-row">
+
+    <div class="st s-sa" onclick="tog('d1')">
+      <div class="s-chip">drafting</div>
+      <div class="s-title">SA builds the submission</div>
+      <div class="s-who">Solution Architect</div>
+      <div class="s-sla">⏱ No SLA — SA works at own pace</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:4px;align-self:center">
+      <div class="arr-line" style="max-width:30px"></div>
+      <div class="arr-lbl">submits</div>
+      <div class="arr-line" style="max-width:30px"></div>
+      <div class="arr-head"></div>
+    </div>
+
+    <div class="st s-gate" onclick="tog('d2')">
+      <div class="s-chip">★ GATE 1</div>
+      <div class="s-title">Intake validation</div>
+      <div class="s-who">System checks completeness</div>
+      <div class="s-sla">⏱ Instant — pass or return to SA</div>
+    </div>
+
+  </div>
+  <div id="d1" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Why "drafting" not "draft"</div>
+        <p>A verb form communicates that something is actively happening. The SA sees "Drafting" in the breadcrumb and understands they are the blocker — not the system. "Draft" reads like a file state; "Drafting" reads like a task.</p>
+      </div>
+      <div class="dp-block"><div class="dp-label">UX — progressive disclosure</div><ul>
+        <li>Each domain tab shows a completion ring (n/N questions answered)</li>
+        <li>Upload tray shows parse status per file in real time</li>
+        <li>Submit button is disabled until all mandatory tabs hit 100%</li>
+        <li>SA can save and return — auto-save on every field blur</li>
+        <li>Checklist questions show a hint tooltip on hover (hint_text from question_registry)</li>
+      </ul></div>
+    </div>
+  </div>
+  <div id="d2" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Gate 1 checks (all must pass)</div><ul>
+        <li>All mandatory checklist questions answered (not left blank)</li>
+        <li>All uploaded artefacts parsed successfully (parse_status = 'complete')</li>
+        <li>At least one artefact tagged to each of the 9 agent domains</li>
+        <li>Problem statement ≥ 50 characters</li>
+        <li>NFR criteria table has at least one quantitative row</li>
+      </ul></div>
+      <div class="dp-block"><div class="dp-label">UX — inline failures, not a wall</div><ul>
+        <li>Validation runs per-tab on every Next click, not just on final Submit</li>
+        <li>Failed items highlighted in-situ with fix links — not a summary list at the top</li>
+        <li>Parse failures show a "Re-upload" button inline next to the file</li>
+        <li>SA is never navigated away from their work — corrections happen in-place</li>
+      </ul></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="arrow-between" style="margin-left:56px">
+  <div class="arr-line"></div>
+  <div class="arr-lbl">Gate 1 passes — review moves to system queue</div>
+  <div class="arr-line"></div>
+  <div class="arr-head"></div>
+</div>
+
+<!-- ── PHASE 2: SYSTEM PREP ── -->
+<div class="phase" data-label="Preparing">
+<div class="phase-inner">
+  <div class="states-row">
+    <div class="st s-sys" onclick="tog('d3')">
+      <div class="s-chip">queued</div>
+      <div class="s-title">Session prepared</div>
+      <div class="s-who">System (automated)</div>
+      <div class="s-sla">⏱ Seconds — automated</div>
+    </div>
+  </div>
+  <div id="d3" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Why "queued"</div>
+        <p>Makes the system's intent legible. The SA submitted; the system has accepted it and is lining up the agent run. "Pending" (old name) was ambiguous — pending what, and whose action? "Queued" tells SA exactly what state they're in: waiting for the AI run to start.</p>
+      </div>
+      <div class="dp-block"><div class="dp-label">System actions</div><ul>
+        <li>Pre-insert 9 domain_reviews rows (agent_status = 'waiting')</li>
+        <li>Pre-insert 6 nfr_scorecard rows (waiting)</li>
+        <li>Set reviews.submitted_at = now()</li>
+        <li>Assign RAG session cache key</li>
+        <li>Queue agent job in worker pool</li>
+        <li>SA sees a confirmation banner: "Submitted — AI review starting shortly"</li>
+      </ul></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="arrow-between" style="margin-left:56px">
+  <div class="arr-line"></div>
+  <div class="arr-lbl">agent job dequeued — orchestrator fires</div>
+  <div class="arr-line"></div>
+  <div class="arr-head"></div>
+</div>
+
+<!-- ── PHASE 3: AGENTS ── -->
+<div class="phase" data-label="AI review">
+<div class="phase-inner">
+  <div class="states-row">
+
+    <div class="st s-ag" onclick="tog('d4')">
+      <div class="s-chip">analysing</div>
+      <div class="s-title">Agents running</div>
+      <div class="s-who">9 domain agents + NFR agent</div>
+      <div class="s-sla">⏱ SLA: ≤ 2 hours</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:4px;align-self:center">
+      <div class="arr-line" style="max-width:30px"></div>
+      <div class="arr-lbl">all complete</div>
+      <div class="arr-line" style="max-width:30px"></div>
+      <div class="arr-head"></div>
+    </div>
+
+    <div class="st s-ag" onclick="tog('d5')">
+      <div class="s-chip">review_ready</div>
+      <div class="s-title">Dossier assembled</div>
+      <div class="s-who">Orchestrator — automated</div>
+      <div class="s-sla">⏱ Minutes after agents finish</div>
+    </div>
+
+  </div>
+  <div id="d4" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Why collapse in_progress + llm_review into "analysing"</div>
+        <p>From the SA's perspective there is only one thing happening: the AI is analysing their submission. Splitting into two technical pipeline states adds noise that no user cares about. One user-facing status; internal sub-states tracked in domain_reviews.agent_status per domain.</p>
+      </div>
+      <div class="dp-block"><div class="dp-label">UX — live progress panel</div><ul>
+        <li>SA can watch a domain-by-domain progress grid in real time</li>
+        <li>Each domain tile flips from "Waiting" → "Analysing" → "✓ Done" as agents complete</li>
+        <li>No page refresh needed — SSE or WebSocket push updates the grid</li>
+        <li>If an agent errors, tile shows "⚠ Retry" and retries automatically (max 2)</li>
+        <li>Estimated completion countdown shown (based on avg processing time)</li>
+      </ul></div>
+    </div>
+  </div>
+  <div id="d5" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Why "review_ready" not "agent_review_complete"</div>
+        <p>"agent_review_complete" is a technical implementation name. "review_ready" is what matters to the humans: the dossier is ready and the EA needs to act. The status name should describe the situation, not the machinery that produced it.</p>
+      </div>
+      <div class="dp-block"><div class="dp-label">Orchestrator writes on entering review_ready</div><ul>
+        <li>Aggregate RAG score and recommended decision computed</li>
+        <li>Decision rationale generated (one final LLM call)</li>
+        <li>report_json.agent_output{} written</li>
+        <li>EA notified via Teams + ServiceNow: "Dossier ready — SLA: 1 business day"</li>
+        <li>EA SLA timer starts</li>
+      </ul></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="arrow-between" style="margin-left:56px">
+  <div class="arr-line"></div>
+  <div class="arr-lbl">dossier routed to EA — 1 business day SLA</div>
+  <div class="arr-line"></div>
+  <div class="arr-head"></div>
+</div>
+
+<!-- ── PHASE 4: EA REVIEW ── -->
+<div class="phase" data-label="EA review">
+<div class="phase-inner">
+  <div class="states-row">
+
+    <div class="st s-ea" onclick="tog('d6')">
+      <div class="s-chip">ea_reviewing</div>
+      <div class="s-title">EA reviews dossier</div>
+      <div class="s-who">Enterprise Architect</div>
+      <div class="s-sla">⏱ SLA: 1 business day</div>
+    </div>
+
+  </div>
+
+  <!-- EA decision branches -->
+  <div style="margin:10px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--color-text-secondary);white-space:nowrap">EA outcome →</span>
+
+    <div class="st s-gate" style="min-width:0;padding:6px 9px;cursor:default" onclick="tog('d7a')">
+      <div class="s-chip">★ GATE 2a</div>
+      <div class="s-title" style="font-size:11px">Approve / Approve with conditions</div>
+    </div>
+
+    <div class="st s-ea" style="min-width:0;padding:6px 9px;cursor:pointer" onclick="tog('d7b')">
+      <div class="s-chip">returned</div>
+      <div class="s-title" style="font-size:11px">Returned to SA for rework</div>
+    </div>
+
+    <div class="st s-ea" style="min-width:0;padding:6px 9px;cursor:pointer" onclick="tog('d7c')">
+      <div class="s-chip">deferred</div>
+      <div class="s-title" style="font-size:11px">Deferred — significant gaps</div>
+    </div>
+
+  </div>
+
+  <div id="d6" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">EA workflow in the portal</div><ul>
+        <li>Domain scorecard shows all 9 scores at a glance</li>
+        <li>Blocked items surface first — EA resolves BLOCKERs before anything else</li>
+        <li>Override any finding, score, action owner, ADR — every change needs a rationale (blocked without it)</li>
+        <li>Per-domain decision: approve / approve with conditions / defer / reject</li>
+        <li>Overall decision derived automatically but EA can override it</li>
+      </ul></div>
+      <div class="dp-block"><div class="dp-label">UX — EA portal design principles</div><ul>
+        <li>Agent recommendation shown alongside KB source citation side-by-side</li>
+        <li>EA's pending actions (unreviewed domains) shown as a to-do count in the header</li>
+        <li>SLA countdown visible throughout — escalation banner at T-4h</li>
+        <li>One-click "Accept all agent recommendations" for domains the EA agrees with</li>
+        <li>Keyboard shortcut support for power users reviewing many dossiers</li>
+      </ul></div>
+    </div>
+  </div>
+
+  <div id="d7a" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">On Gate 2a — what happens</div><ul>
+        <li>reviews.status = 'approved' (full) or 'conditionally_approved'</li>
+        <li>Dossier published to ARB portal + Confluence</li>
+        <li>ARB meeting scheduled (MS Graph Calendar API)</li>
+        <li>Action owners notified with confirmed due dates</li>
+        <li>Reminder schedule populated for all conditional gate actions</li>
+        <li>SA notified: "Your review has been approved — ARB meeting scheduled"</li>
+      </ul></div>
+      <div class="dp-block"><div class="dp-label">Why split "approved" and "conditionally_approved"</div>
+        <p>These are meaningfully different states for the SA and for post-ARB tracking. "Approved" means done — no further action required. "Conditionally_approved" means the review is published and ARB can proceed, but actions must be closed before the conditional tag is lifted. Conflating them into one status forces the UI to decode the decision field to understand which case applies.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="d7b" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Returned — UX design</div><ul>
+        <li>Status = 'returned' (not 'rework' — more neutral, less alarming)</li>
+        <li>SA receives a structured gap list — not a free-text note — listing exactly which domains and which questions need addressing</li>
+        <li>SA opens the form pre-populated; affected domains highlighted with a "Needs attention" banner</li>
+        <li>SA can re-submit individual domains — partial re-submission allowed</li>
+        <li>Only affected domains re-run by agents on re-submission (not full pipeline)</li>
+        <li>Return count tracked — third return triggers escalation to ARB chair</li>
+      </ul></div>
+      <div class="dp-block"><div class="dp-label">DB writes on returned</div><ul>
+        <li>reviews.status = 'returned'</li>
+        <li>reviews.rework_gaps[] = structured gap list from EA</li>
+        <li>reviews.return_count incremented</li>
+        <li>domain_reviews rows for affected domains reset to agent_status = 'waiting'</li>
+        <li>SA SLA timer restarts for the affected domains</li>
+      </ul></div>
+    </div>
+  </div>
+
+  <div id="d7c" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Deferred — meaning</div>
+        <p>Deferred means the review cannot proceed at all — not a minor rework but a fundamental gap (e.g. VAPT evidence entirely absent, solution architecture fundamentally misaligned). The review is closed and a new review must be started from scratch after the SA has resolved the underlying issues. Different from 'returned' which is a targeted correction loop.</p>
+      </div>
+      <div class="dp-block"><div class="dp-label">DB writes on deferred</div><ul>
+        <li>reviews.status = 'deferred'</li>
+        <li>reviews.decision = 'defer'</li>
+        <li>EA must document deferral rationale (minimum 50 chars, blocking)</li>
+        <li>SA notified with full deferral reason and guidance on what to address</li>
+        <li>Review record preserved for audit — not deleted</li>
+      </ul></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div class="arrow-between" style="margin-left:56px">
+  <div class="arr-line"></div>
+  <div class="arr-lbl">conditionally_approved — action owners working items</div>
+  <div class="arr-line"></div>
+  <div class="arr-head"></div>
+</div>
+
+<!-- ── PHASE 5: ACTION RESOLUTION ── -->
+<div class="phase" data-label="Resolution">
+<div class="phase-inner">
+  <div class="states-row">
+
+    <div class="st s-sa" onclick="tog('d8')">
+      <div class="s-chip">conditionally_approved</div>
+      <div class="s-title">Action owners resolve items</div>
+      <div class="s-who">SA + nominated action owners</div>
+      <div class="s-sla">⏱ Per confirmed due dates</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:4px;align-self:center">
+      <div class="arr-line" style="max-width:30px"></div>
+      <div class="arr-lbl">evidence submitted</div>
+      <div class="arr-line" style="max-width:30px"></div>
+      <div class="arr-head"></div>
+    </div>
+
+    <div class="st s-gate" onclick="tog('d9')">
+      <div class="s-chip">★ GATE 3</div>
+      <div class="s-title">EA validates evidence</div>
+      <div class="s-who">Enterprise Architect</div>
+      <div class="s-sla">⏱ SLA: 3 business days</div>
+    </div>
+
+  </div>
+  <div id="d8" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Action owner experience</div><ul>
+        <li>Receives a direct link to their specific action(s) — not the whole dossier</li>
+        <li>Each action shows: what to do, verification method, due date, escalation contact</li>
+        <li>Uploads evidence artefact inline — no need to navigate to the full dossier</li>
+        <li>Can add notes to the evidence submission</li>
+        <li>Automated reminders: T-7d, T-3d, T-1d, T+0 overdue, T+3d escalation</li>
+      </ul></div>
+      <div class="dp-block"><div class="dp-label">UX — action owner does not need ARB portal access</div>
+        <p>Action owners are often developers or leads who are not regular ARB participants. They should be able to close their actions via a simple deep-link form — no login to the full ARB portal required. A tokenised link (valid for the action's due date + 30 days) opens a minimal "complete this action" page.</p>
+      </div>
+    </div>
+  </div>
+  <div id="d9" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">Gate 3 — EA validates</div><ul>
+        <li>EA reviews submitted evidence against the verification_method for each action</li>
+        <li>One-click approve or reject per action</li>
+        <li>Rejected actions return to action owner with EA feedback inline</li>
+        <li>Waiver ADRs tracked separately — expiry reminders at T-30d and T-7d</li>
+      </ul></div>
+      <div class="dp-block"><div class="dp-label">Auto-promotion rule</div>
+        <p>When the last is_conditional_gate action transitions to 'closed', the system automatically promotes the review from 'conditionally_approved' to 'closed' without EA having to manually flip a switch. EA is notified of the auto-promotion and can reverse it within 48h if needed.</p>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="arrow-between" style="margin-left:56px">
+  <div class="arr-line"></div>
+  <div class="arr-lbl">all conditional gate actions closed</div>
+  <div class="arr-line"></div>
+  <div class="arr-head"></div>
+</div>
+
+<!-- ── PHASE 6: CLOSED ── -->
+<div class="phase" data-label="Done">
+<div class="phase-inner">
+  <div class="states-row">
+    <div class="st s-done" onclick="tog('d10')">
+      <div class="s-chip">closed</div>
+      <div class="s-title">Review complete</div>
+      <div class="s-who">System (automated)</div>
+    </div>
+  </div>
+  <div id="d10" class="detail-pane">
+    <div class="dp-grid">
+      <div class="dp-block"><div class="dp-label">On closing</div><ul>
+        <li>All ADRs written back to Confluence ADR space + CMDB</li>
+        <li>KB updated with lessons learned (within 24h)</li>
+        <li>Analytics record written (cycle time, override rate, ADR closure rate)</li>
+        <li>Review record locked — immutable except by admin</li>
+        <li>SA and EA receive a "Review closed" summary email</li>
+      </ul></div>
+      <div class="dp-block"><div class="dp-label">Why "closed" not "review_complete"</div>
+        <p>"closed" is a single plain word used universally in issue trackers, ServiceNow, and Jira. It is immediately understood by anyone who has used any workflow tool. "review_complete" reads like a composite internal code. In status badges, "Closed" takes 6 characters vs 15 — cleaner in tables, chips, and notifications.</p>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- Loop notes -->
+<div class="loop-note" style="margin-left:56px;margin-top:12px">
+  <span>↩</span>
+  <span><strong>Returned loop:</strong> 'returned' → SA fixes affected domains → re-submits → 'queued' → agents re-run targeted domains only → 'review_ready' → EA re-reviews. Full loop SLA restarts for the affected domains only.</span>
+</div>
+<div class="loop-note" style="margin-left:56px;margin-top:4px">
+  <span>↩</span>
+  <span><strong>Action rejection loop:</strong> Within 'conditionally_approved' — EA rejects submitted evidence → action returns to 'open' → action owner re-notified → re-submits evidence → EA re-validates. The parent review status does not change during this loop.</span>
+</div>
+
+</div><!-- /flow -->
+
+<!-- ══════════════════ NAMES ══════════════════ -->
+<div id="names" class="view">
+<div class="note n-blue">Status names follow three principles: (1) <strong>User-facing, not machine-facing</strong> — the name should describe the situation from the actor's perspective; (2) <strong>Verb forms for active states</strong> — "analysing" tells the SA something is happening right now; (3) <strong>Short</strong> — fits in a badge without truncation.</div>
+
+<div class="sec">reviews.status</div>
+<div class="card">
+<table>
+  <thead><tr><th>New name</th><th>Replaces</th><th>Actor who sees it</th><th>Why this name</th></tr></thead>
+  <tbody>
+  <tr><td><span class="mono">drafting</span></td><td><span class="mono b-gray badge">draft</span></td><td>SA</td><td>Verb form — communicates active authoring. SA is the blocker, not the system.</td></tr>
+  <tr><td><span class="mono">queued</span></td><td><span class="mono b-gray badge">submitted</span> + <span class="mono b-gray badge">pending</span></td><td>SA, System</td><td>Merges two nearly-identical states. Makes the queue metaphor explicit — agent job is waiting to run. No ambiguity about whose action is next.</td></tr>
+  <tr><td><span class="mono">analysing</span></td><td><span class="mono b-gray badge">in_review</span> + <span class="mono b-gray badge">in_progress</span> + <span class="mono b-gray badge">llm_review</span></td><td>SA (progress panel)</td><td>Collapses three internal technical states into one user-visible state. From the SA's view, one thing is happening: the AI is analysing. Domain-level progress shown via domain_reviews.agent_status.</td></tr>
+  <tr><td><span class="mono">review_ready</span></td><td><span class="mono b-gray badge">agent_review_complete</span></td><td>EA, SA</td><td>"The dossier is ready for your review" — describes the situation, not the machinery. EA knows action is needed. SA knows the AI run is done.</td></tr>
+  <tr><td><span class="mono">ea_reviewing</span></td><td><span class="mono b-gray badge">ea_review</span></td><td>SA, EA</td><td>Verb form — signals active work. SA can see "EA reviewing" in their dashboard and understand the EA is working on it, not that it's sitting in a queue.</td></tr>
+  <tr><td><span class="mono">returned</span></td><td><span class="mono b-gray badge">rework</span></td><td>SA</td><td>Neutral and familiar from document review workflows. "Rework" can sound punitive. "Returned" is standard — think: a returned manuscript, a returned planning application.</td></tr>
+  <tr><td><span class="mono">approved</span></td><td><span class="mono b-gray badge">approved</span></td><td>SA, EA, ARB</td><td>Unchanged — already correct. Full approval, no outstanding conditions.</td></tr>
+  <tr><td><span class="mono">conditionally_approved</span></td><td><em>did not exist as separate status</em></td><td>SA, EA, Action owners</td><td>New distinct status. Separates "approved but with open actions" from clean "approved". Drives the post-approval action resolution workflow without needing to decode the decision field.</td></tr>
+  <tr><td><span class="mono">deferred</span></td><td><span class="mono b-gray badge">deferred</span></td><td>SA, EA</td><td>Unchanged — already correct. Means the review cannot proceed and must restart.</td></tr>
+  <tr><td><span class="mono">rejected</span></td><td><span class="mono b-gray badge">rejected</span></td><td>SA, EA</td><td>Unchanged — already correct. Terminal negative outcome.</td></tr>
+  <tr><td><span class="mono">closed</span></td><td><span class="mono b-gray badge">review_complete</span></td><td>All</td><td>Universal single word. Instantly understood. Fits in any badge.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="sec">Supporting table status names</div>
+<div class="card">
+<table>
+  <thead><tr><th>Table</th><th>New values</th><th>Replaces / adds</th><th>Rationale</th></tr></thead>
+  <tbody>
+  <tr><td>domain_reviews.agent_status</td><td><span class="mono">waiting → running → done → failed → skipped</span></td><td>pending/running/complete/error/skipped</td><td>"done" and "failed" are plain English. "waiting" is more accurate than "pending" — the row is waiting for its agent to run.</td></tr>
+  <tr><td>findings.severity</td><td><span class="mono">blocker · high · medium · low · info</span></td><td>critical/major/minor (expanded)</td><td>"blocker" is the established term in agile/Jira — universally understood as "stops the work". "critical" is overloaded (also used for incident severity).</td></tr>
+  <tr><td>actions.status</td><td><span class="mono">open · in_progress · evidence_submitted · closed · rejected · waived</span></td><td>open/in_progress/completed/blocked</td><td>"closed" matches the parent review. "evidence_submitted" is an explicit intermediate state. "rejected" replaces "blocked" — "blocked" implies an external dependency; "rejected" means the EA reviewed and said no.</td></tr>
+  <tr><td>adrs.status</td><td><span class="mono">proposed · accepted · conditional · rejected · superseded</span></td><td>adds "conditional"</td><td>"conditional" matches the parent review state — an ADR is accepted subject to actions being completed.</td></tr>
+  <tr><td>recommendations.priority</td><td><span class="mono">critical · high · medium · low</span></td><td>—</td><td>Consistent with findings severity language.</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<!-- ══════════════════ UX ══════════════════ -->
+<div id="ux" class="view">
+
+<div class="sec">Seven UX improvements over the earlier design</div>
+
+<div class="g2">
+  <div class="card">
+    <div class="ch"><span class="lbl">1 — Progress instead of waiting</span><span class="badge b-purple">SA experience</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      During 'analysing', the SA sees a live 3×3 domain grid. Each cell flips from "Waiting" → "Analysing…" → "✓ Done" via SSE push. This transforms a black-box wait into a visible process. The SA understands what's happening and can estimate when the EA will receive the dossier. Eliminates the "is it stuck?" support ticket.
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="lbl">2 — Partial submission on return</span><span class="badge b-green">SA experience</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      When a dossier is 'returned', only the affected domains are re-opened for editing. The SA does not have to re-fill the entire form — the unaffected domain tabs are locked with a green "EA approved" badge. The re-submission triggers agent re-runs only for the changed domains. This turns a potentially demoralising "start over" into a targeted correction.
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="lbl">3 — Action owners need no portal login</span><span class="badge b-amber">Action owner experience</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      Action owners (often developers, not EA participants) receive a tokenised deep-link that opens a minimal "complete this action" page — no ARB portal account required. They see: what to do, the verification method, a file upload, and a notes field. One page, one action. This removes the biggest friction point in post-approval tracking.
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="lbl">4 — EA "Accept all" shortcut</span><span class="badge b-amber">EA experience</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      For domains the EA agrees with completely, a single "Accept this domain" button accepts all agent findings, scores and ADRs in one click. The EA's attention is drawn to the items that need overriding — which are highlighted in a "Needs attention" sidebar — rather than forcing them to click through every compliant finding. Reduces Gate 2 review time significantly for GREEN domains.
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="lbl">5 — Auto-promotion at closure</span><span class="badge b-blue">System behaviour</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      When the last conditional gate action is closed, the system automatically promotes 'conditionally_approved' → 'closed' and notifies the EA. EA has a 48-hour window to reverse this if needed. Previously, EA had to manually flip the review closed — this often caused reviews to linger in a completed-but-not-closed limbo, distorting cycle-time metrics.
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="lbl">6 — SLA visibility everywhere</span><span class="badge b-blue">All actors</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      Every actor sees their SLA countdown in the header of any page related to their task. EA sees "1d 4h remaining to complete review". Action owner sees "Due in 12 days". At T-4h for EA and T-1d for action owners, the countdown turns amber; at T=0 it turns red and sends an escalation notification. No SLA is invisible.
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="lbl">7 — Inline validation, not a wall</span><span class="badge b-green">SA experience</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      Gate 1 validation runs per-tab on every Next click, not just on final Submit. Errors appear inline next to the failing element with a one-line fix instruction. Parse failures appear next to the file in the upload tray with a "Re-upload" button. The SA is never shown a list of 12 errors at the bottom of a form — each error surfaces at the point of entry.
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="lbl">8 — Return count escalation</span><span class="badge b-red">Governance</span></div>
+    <div style="padding:.75rem 1rem;font-size:12px;line-height:1.6;color:var(--color-text-secondary)">
+      reviews.return_count is incremented on each 'returned' transition. On the third return, an escalation notification fires to the ARB chair. This surfaces chronic review quality issues without manual oversight. The EA can see the return count badge on any dossier — a dossier returned twice is a signal that SA guidance or the review criteria may need attention.
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════ COMPARE ══════════════════ -->
+<div id="compare" class="view">
+<div class="note n-amber">Green rows = new states added. Strikethrough rows = removed or merged. Yellow rows = renamed or split. Unchanged rows not shown.</div>
+<div class="card">
+<table>
+  <thead><tr><th>Change</th><th>Old status</th><th>New status</th><th>Reason</th></tr></thead>
+  <tbody>
+  <tr class="comp-del"><td>Removed</td><td>pending</td><td>—</td><td>Merged with 'submitted' into 'queued'. Was identical in meaning to 'submitted' in practice.</td></tr>
+  <tr class="comp-del"><td>Removed</td><td>in_review</td><td>—</td><td>Replaced by 'analysing'. Too generic — "in review" could mean the EA is reviewing or agents are reviewing.</td></tr>
+  <tr class="comp-del"><td>Removed</td><td>submitted (as a status)</td><td>—</td><td>Merged into 'queued'. "Submitted" is an action, not a durable state. Once submitted, you're queued for agent run.</td></tr>
+  <tr class="comp-del"><td>Removed (internal only)</td><td>in_progress / llm_review / agent_review_complete</td><td>—</td><td>Technical pipeline states moved to domain_reviews.agent_status. Not surfaced as parent review status.</td></tr>
+  <tr class="comp-mod"><td>Renamed</td><td>draft</td><td>drafting</td><td>Verb form. SA is actively doing something.</td></tr>
+  <tr class="comp-mod"><td>Renamed</td><td>ea_review</td><td>ea_reviewing</td><td>Verb form. Signals EA is actively working.</td></tr>
+  <tr class="comp-mod"><td>Renamed</td><td>rework</td><td>returned</td><td>Neutral, familiar. Less punitive than "rework".</td></tr>
+  <tr class="comp-mod"><td>Renamed</td><td>review_complete</td><td>closed</td><td>Universal single word. Shorter, cleaner, fits in badges.</td></tr>
+  <tr class="comp-add"><td>Added</td><td>—</td><td>queued</td><td>New merged state replacing submitted+pending. Makes the queue intent explicit.</td></tr>
+  <tr class="comp-add"><td>Added</td><td>—</td><td>analysing</td><td>New user-facing state covering all agent pipeline activity.</td></tr>
+  <tr class="comp-add"><td>Added</td><td>—</td><td>review_ready</td><td>Explicit signal that dossier is assembled and EA action is needed.</td></tr>
+  <tr class="comp-add"><td>Added</td><td>—</td><td>conditionally_approved</td><td>New state separating clean approval from conditional. Drives post-approval action tracking.</td></tr>
+  <tr><td>Kept</td><td>approved</td><td>approved</td><td>Correct as-is.</td></tr>
+  <tr><td>Kept</td><td>deferred</td><td>deferred</td><td>Correct as-is.</td></tr>
+  <tr><td>Kept</td><td>rejected</td><td>rejected</td><td>Correct as-is.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="sec">Full optimised status sequence</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11.5px;margin-bottom:1.25rem">
+  <span class="badge b-green">drafting</span><span>→</span>
+  <span class="badge b-gray">queued</span><span>→</span>
+  <span class="badge b-purple">analysing</span><span>→</span>
+  <span class="badge b-purple">review_ready</span><span>→</span>
+  <span class="badge b-amber">ea_reviewing</span><span>→</span>
+  <span style="color:var(--color-text-secondary)">EA decides:</span>
+  <span class="badge b-green">approved</span>
+  <span style="color:var(--color-text-secondary)">or</span>
+  <span class="badge b-blue">conditionally_approved</span><span>→</span><span class="badge b-gray">closed</span>
+  <span style="color:var(--color-text-secondary)">or</span>
+  <span class="badge b-amber">returned</span><span>→ (loop back to queued)</span>
+  <span style="color:var(--color-text-secondary)">or</span>
+  <span class="badge b-red">deferred</span>
+  <span style="color:var(--color-text-secondary)">or</span>
+  <span class="badge b-red">rejected</span>
+</div>
+
+<div class="sec">Count reduction</div>
+<div class="g2">
+  <div class="card"><div class="ch"><span class="lbl">Before</span></div>
+    <div style="padding:.75rem 1rem;font-size:12.5px">
+      11 status values: draft · submitted · pending · in_review · in_progress · llm_review · agent_review_complete · ea_review · rework · review_complete · approved · rejected · deferred<br>
+      <span style="color:var(--color-text-secondary);font-size:11.5px">(13 including the ones proposed in the last session)</span>
+    </div>
+  </div>
+  <div class="card"><div class="ch"><span class="lbl">After</span></div>
+    <div style="padding:.75rem 1rem;font-size:12.5px">
+      10 status values: drafting · queued · analysing · review_ready · ea_reviewing · returned · approved · conditionally_approved · deferred · rejected · closed<br>
+      <span style="color:var(--color-text-secondary);font-size:11.5px">(11 total, but with clearer semantics and no ambiguous overlaps)</span>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════ DDL ══════════════════ -->
+<div id="ddl" class="view">
+<div class="note n-green">Additive migration only. The CHECK constraint on reviews.status is replaced. All new status values are backwards-compatible — existing rows in 'draft', 'approved', 'rejected', 'deferred' map directly to 'drafting', 'approved', 'rejected', 'deferred' via the migration UPDATE below.</div>
+
+<div class="sec">reviews.status migration</div>
+<div style="font-family:var(--font-mono);font-size:11.5px;background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:.875rem 1rem;overflow-x:auto;line-height:1.8;white-space:pre;color:var(--color-text-primary)">BEGIN;
+
+<span style="color:var(--color-text-secondary)">-- 1. Drop old CHECK constraint</span>
+ALTER TABLE public.reviews
+  DROP CONSTRAINT IF EXISTS valid_status;
+
+<span style="color:var(--color-text-secondary)">-- 2. Add new CHECK with optimised status values</span>
+ALTER TABLE public.reviews
+  ADD CONSTRAINT valid_status CHECK (status = ANY (ARRAY[
+    'drafting',              <span style="color:var(--color-text-secondary)">-- replaces 'draft'</span>
+    'queued',                <span style="color:var(--color-text-secondary)">-- replaces 'submitted' + 'pending'</span>
+    'analysing',             <span style="color:var(--color-text-secondary)">-- replaces 'in_review' + 'in_progress' + 'llm_review'</span>
+    'review_ready',          <span style="color:var(--color-text-secondary)">-- replaces 'agent_review_complete'</span>
+    'ea_reviewing',          <span style="color:var(--color-text-secondary)">-- replaces 'ea_review'</span>
+    'returned',              <span style="color:var(--color-text-secondary)">-- replaces 'rework'</span>
+    'approved',              <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'conditionally_approved',<span style="color:var(--color-text-secondary)">-- NEW — was implicit in approved+conditions</span>
+    'deferred',              <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'rejected',              <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'closed'                 <span style="color:var(--color-text-secondary)">-- replaces 'review_complete'</span>
+  ]));
+
+<span style="color:var(--color-text-secondary)">-- 3. Migrate existing rows (run in same transaction)</span>
+UPDATE public.reviews SET status = 'drafting'   WHERE status = 'draft';
+UPDATE public.reviews SET status = 'queued'     WHERE status IN ('submitted','pending');
+UPDATE public.reviews SET status = 'analysing'  WHERE status = 'in_review';
+UPDATE public.reviews SET status = 'ea_reviewing' WHERE status = 'ea_review';
+UPDATE public.reviews SET status = 'returned'   WHERE status = 'rework';
+UPDATE public.reviews SET status = 'closed'     WHERE status = 'review_complete';
+<span style="color:var(--color-text-secondary)">-- 'approved','rejected','deferred' — no change needed</span>
+
+<span style="color:var(--color-text-secondary)">-- 4. Add return_count column for escalation tracking</span>
+ALTER TABLE public.reviews
+  ADD COLUMN IF NOT EXISTS return_count smallint NOT NULL DEFAULT 0;
+
+COMMIT;</div>
+
+<div class="sec">domain_reviews.agent_status migration</div>
+<div style="font-family:var(--font-mono);font-size:11.5px;background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:.875rem 1rem;overflow-x:auto;line-height:1.8;white-space:pre;color:var(--color-text-primary)">BEGIN;
+
+ALTER TABLE public.domain_reviews
+  DROP CONSTRAINT IF EXISTS chk_dr_agent_status;
+
+ALTER TABLE public.domain_reviews
+  ADD CONSTRAINT chk_dr_agent_status CHECK (agent_status = ANY (ARRAY[
+    'waiting',   <span style="color:var(--color-text-secondary)">-- replaces 'pending' — more explicit</span>
+    'running',   <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'done',      <span style="color:var(--color-text-secondary)">-- replaces 'complete'</span>
+    'failed',    <span style="color:var(--color-text-secondary)">-- replaces 'error'</span>
+    'skipped'    <span style="color:var(--color-text-secondary)">-- unchanged</span>
+  ]));
+
+UPDATE public.domain_reviews SET agent_status = 'waiting' WHERE agent_status = 'pending';
+UPDATE public.domain_reviews SET agent_status = 'done'    WHERE agent_status = 'complete';
+UPDATE public.domain_reviews SET agent_status = 'failed'  WHERE agent_status = 'error';
+
+COMMIT;</div>
+
+<div class="sec">actions.status migration</div>
+<div style="font-family:var(--font-mono);font-size:11.5px;background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:.875rem 1rem;overflow-x:auto;line-height:1.8;white-space:pre;color:var(--color-text-primary)">BEGIN;
+
+ALTER TABLE public.actions
+  DROP CONSTRAINT IF EXISTS actions_status_check;
+
+ALTER TABLE public.actions
+  ADD CONSTRAINT actions_status_check CHECK (status = ANY (ARRAY[
+    'open',               <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'in_progress',        <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'evidence_submitted', <span style="color:var(--color-text-secondary)">-- NEW: explicit intermediate before EA closes</span>
+    'closed',             <span style="color:var(--color-text-secondary)">-- replaces 'completed' — consistent with parent review</span>
+    'rejected',           <span style="color:var(--color-text-secondary)">-- replaces 'blocked' — EA rejected the evidence</span>
+    'waived'              <span style="color:var(--color-text-secondary)">-- NEW: EA accepted a waiver in lieu of completion</span>
+  ]));
+
+UPDATE public.actions SET status = 'closed'   WHERE status = 'completed';
+UPDATE public.actions SET status = 'rejected'  WHERE status = 'blocked';
+
+COMMIT;</div>
+
+<div class="sec">adrs.status — add 'conditional'</div>
+<div style="font-family:var(--font-mono);font-size:11.5px;background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:.875rem 1rem;overflow-x:auto;line-height:1.8;white-space:pre;color:var(--color-text-primary)">BEGIN;
+
+ALTER TABLE public.adrs
+  DROP CONSTRAINT IF EXISTS adrs_status_check;
+
+ALTER TABLE public.adrs
+  ADD CONSTRAINT adrs_status_check CHECK (status = ANY (ARRAY[
+    'proposed',    <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'accepted',    <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'conditional', <span style="color:var(--color-text-secondary)">-- NEW: accepted subject to actions being closed</span>
+    'rejected',    <span style="color:var(--color-text-secondary)">-- unchanged</span>
+    'superseded'   <span style="color:var(--color-text-secondary)">-- unchanged</span>
+  ]));
+
+COMMIT;</div>
+
+</div><!-- /ddl -->
+
+</div><!-- /wrap -->
+
+<script>
+function sw(id,btn){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+  btn.classList.add('on');
+}
+function tog(id){
+  const el=document.getElementById(id);
+  if(el) el.classList.toggle('open');
+}
+</script>

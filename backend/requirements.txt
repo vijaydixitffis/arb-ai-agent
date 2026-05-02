@@ -3,6 +3,9 @@ fastapi>=0.115.0
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
+# JSON utilities
+json-repair>=0.30
+
 # AI and ML
 langchain==0.1.0
 langchain-openai==0.0.2
@@ -32,7 +35,7 @@ psycopg2-binary==2.9.9
 
 # Utilities
 aiofiles==23.2.1
-httpx==0.25.2
+httpx>=0.25.0,<0.28.0
 
 PyPDF2
 python-docx
