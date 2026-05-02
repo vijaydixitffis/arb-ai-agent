@@ -73,7 +73,7 @@ async function callGemini(
       ],
       generationConfig: {
         temperature: 0.5,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 16384,
         responseMimeType: 'application/json',
       },
     }),
@@ -123,7 +123,7 @@ async function callOpenAI(
         { role: 'user',   content: userPrompt   },
       ],
       temperature:     0.5,
-      max_tokens:      8000,
+      max_tokens:      16384,
       response_format: { type: 'json_object' },
     }),
   })
@@ -157,7 +157,7 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_tokens: 16384,
       system:     systemPrompt,
       messages: [
         { role: 'user', content: userPrompt },
@@ -202,7 +202,7 @@ async function callOpenRouter(
         { role: 'user',   content: userPrompt   },
       ],
       temperature:     0.5,
-      max_tokens:      8000,
+      max_tokens:      16384,
       response_format: { type: 'json_object' },
     }),
   })

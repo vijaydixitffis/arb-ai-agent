@@ -56,13 +56,14 @@ export interface ReviewInput {
 
 export interface DomainAdr {
   id: string
-  type: 'DECISION' | 'WAIVER'
+  adr_type: 'NEW_DECISION' | 'WAIVER' | 'DEVIATION' | 'RATIFICATION' | 'DEPRECATION'
   decision: string
   rationale: string
   context?: string
   owner: string
   target_date: string | null
   waiver_expiry_date?: string | null
+  status?: string
 }
 
 export interface DomainAction {
@@ -297,12 +298,16 @@ RULES:
 
 4. Every finding with rag_score <= 3 (AMBER or RED) MUST have at least one Action in actions[].
 
-5. Generate ADRs only for decisions that warrant formal recording (aim for 0–3 per domain):
-   - Technology or vendor choices that deviate from EA standards → type: DECISION
-   - Architectural patterns that differ materially from the standard approach → type: DECISION
-   - Any rag_score 1–2 finding where the SA needs a formal exception → type: WAIVER
-   Do NOT generate ADRs for straightforward remediation items or routine AMBER findings.
-   adrs[] may be empty if no significant decisions or exceptions were identified.
+5. Generate ADRs for decisions and exceptions that warrant formal recording (aim for 1–3 per domain):
+   MANDATORY — you MUST generate an ADR for each of these:
+   - Any finding with rag_score 1 (BLOCKER) → adr_type: WAIVER (formal exception required before approval)
+   - Any finding with rag_score 2 (RED) → adr_type: WAIVER (significant gap needing formal exception)
+   - Technology or vendor choices that deviate from EA standards → adr_type: NEW_DECISION
+   - Architectural patterns that differ materially from the standard approach → adr_type: NEW_DECISION
+   OPTIONAL (generate only if clearly applicable):
+   - Notable AMBER decisions that set a precedent or need tracking → adr_type: DECISION
+   Do NOT generate ADRs for routine GREEN findings or straightforward remediation items.
+   adrs[] MUST NOT be empty if any finding has rag_score <= 2.
 
 6. ADRs of type WAIVER must include a proposed waiver_expiry_date (ISO date string).
 
@@ -465,16 +470,17 @@ Include "project_context" as the first key (Solution domain only):
   "summary": {
     "rag_score": 3,
     "rag_label": "GREEN | AMBER | RED",
-    "overall_readiness": "READY | READY_WITH_CONDITIONS | NOT_READY",
+    "overall_readiness": "APPROVE | APPROVE_WITH_CONDITIONS | DEFER | REJECT",
     "rationale": "One-sentence justification for the domain rag_score",
-    "executive_summary": "2-3 sentence narrative of domain readiness for the ARB panel",
-    "compliant_areas": ["area1", "area2"],
-    "gap_areas": ["gap1", "gap2"],
+    "executive_summary": "3-5 sentences covering: current state, key strengths, critical gaps, ARB readiness",
+    "compliant_areas": ["area1 — references specific standard or pattern", "area2"],
+    "gap_areas": ["${domainCode}-F01: Short gap description", "${domainCode}-F02: ..."],
     "total_findings": 0,
     "blocker_count": 0,
     "action_count": 0,
     "adr_count": 0,
-    "evidence_quality": "STRONG | ADEQUATE | WEAK | ABSENT",
+    "mandatory_gaps": 0,
+    "evidence_quality": "COMPLETE | PARTIAL | INSUFFICIENT | ABSENT",
     "domain_specific_scores": { "sub_area_name": 4 },
     "kb_references": ["KB doc title or ID cited"]
   },
@@ -497,13 +503,13 @@ Include "project_context" as the first key (Solution domain only):
     {
       "id": "${domainCode}-REC-01",
       "domain": "${domainCode}",
-      "priority": "HIGH | MEDIUM | LOW",
-      "title": "Short recommendation title",
-      "rationale": "Why this is recommended",
-      "approved_pattern_ref": "EA-approved pattern name if applicable",
-      "benefit": "Expected benefit of implementing this recommendation",
-      "implementation_hint": "How to implement (optional)",
-      "applies_to_finding_id": "${domainCode}-F01",
+      "priority": "CRITICAL | HIGH | MEDIUM | LOW",
+      "title": "Action-verb lead: Implement X for Y — specific to this solution",
+      "rationale": "Why this recommendation applies to this specific solution (1-2 sentences)",
+      "approved_pattern_ref": "Pattern or standard name and version from KB",
+      "benefit": "Specific measurable or verifiable benefit",
+      "implementation_hint": "Optional: concrete first step for the SA",
+      "applies_to_finding_id": "${domainCode}-F01 or null",
       "is_agent_generated": true,
       "kb_source_ref": ["KB doc title"]
     }
@@ -514,12 +520,13 @@ Include "project_context" as the first key (Solution domain only):
       "check_category": "CATEGORY_FROM_LIST_ABOVE",
       "rag_score": 4,
       "rag_label": "GREEN | AMBER | RED",
-      "title": "Short finding title",
+      "title": "[what is wrong or confirmed] in [specific component/artifact] — ≤140 chars",
       "finding": "Balanced assessment: what the SA addressed well and any specific gap (reference artifact or KB)",
-      "recommendation": "Specific, actionable remediation if a gap exists; omit or 'no action required' if GREEN",
+      "description": "2-4 sentences: what was found, in which SA artifact, why it is non-compliant or compliant",
+      "recommendation": "1-2 sentences: specific remediation action — null if no action required",
       "evidence_source": "File name or section in SA submission where evidence was reviewed",
-      "standard_violated": "Which standard is not met (null if compliant)",
-      "impact": "Impact of this gap if not addressed (null if GREEN)",
+      "standard_violated": "Exact standard, policy or principle violated with version — null if GREEN",
+      "impact": "Specific risk if unresolved — null if GREEN",
       "is_blocker": false,
       "waiver_eligible": false,
       "links_to_action_ids": ["${domainCode}-ACT-01"],
@@ -534,16 +541,16 @@ Include "project_context" as the first key (Solution domain only):
     {
       "id": "${domainCode}-ACT-01",
       "domain": "${domainCode}",
-      "action_type": "MANDATORY | RECOMMENDED | CONDITIONAL",
-      "title": "Short action title",
+      "action_type": "BLOCKER_RESOLUTION | AMBER_CONDITION | DOCUMENTATION | EVIDENCE_SUBMISSION | WAIVER_APPLICATION | POST_GO_LIVE",
+      "title": "Action-verb lead — specific enough to act without reading the finding",
       "finding_ref": "${domainCode}-F01",
       "action": "Specific, measurable remediation step",
       "owner_role": "solution_architect | enterprise_architect | dev_team | security_team",
       "proposed_owner": "solution_architect",
       "due_days": 30,
-      "proposed_due_date": "YYYY-MM-DD or null",
+      "proposed_due_date": "BEFORE_ARB | WITHIN_2_WEEKS | WITHIN_30_DAYS | WITHIN_60_DAYS | WITHIN_QUARTER | PRE_GO_LIVE",
       "priority": "HIGH | MEDIUM | LOW",
-      "verification_method": "How EA will verify this is done",
+      "verification_method": "How completion will be verified — specific artifact or review step",
       "is_conditional_approval_gate": false,
       "links_to_finding_id": "${domainCode}-F01",
       "links_to_blocker_id": null
@@ -553,22 +560,25 @@ Include "project_context" as the first key (Solution domain only):
     {
       "id": "ADR-${domainCode}-01",
       "domain": "${domainCode}",
-      "type": "DECISION | WAIVER",
-      "adr_type": "DECISION | WAIVER",
-      "title": "Short ADR title",
-      "decision": "Formal decision statement",
-      "rationale": "Why this decision is being made",
-      "context": "Background context (optional)",
-      "consequences": "Trade-offs and implications",
-      "options_considered": [{"option": "option name", "pros": "pros", "cons": "cons"}],
-      "mitigations": ["mitigation step"],
+      "adr_type": "NEW_DECISION | WAIVER | DEVIATION | RATIFICATION | DEPRECATION",
+      "title": "Decision: [verb + specific choice] or Waiver: [specific deviation]",
+      "decision": "The chosen option and its key parameters — specific, not vague",
+      "rationale": "Why this option was chosen, referencing architecture principles or KB patterns",
+      "context": "2-4 sentences: why this decision was needed",
+      "consequences": "Both positive outcomes and trade-offs accepted",
+      "options_considered": [
+        {"option_label": "A", "description": "Option A description", "pros": ["pro1"], "cons": ["con1"]},
+        {"option_label": "B", "description": "Option B description", "pros": ["pro1"], "cons": ["con1"]}
+      ],
+      "mitigations": ["Specific mitigation for each risk in consequences"],
       "owner": "Role or team responsible",
-      "proposed_owner": "Role or team",
+      "proposed_owner": "Role responsible for implementing this ADR",
       "target_date": "YYYY-MM-DD or null",
-      "proposed_target_date": "YYYY-MM-DD or null",
-      "waiver_expiry_date": "YYYY-MM-DD — required when type = WAIVER, else null",
+      "proposed_target_date": "IMMEDIATE | WITHIN_30_DAYS | WITHIN_QUARTER | NEXT_RELEASE | ONGOING",
+      "waiver_expiry_date": "YYYY-MM-DD — REQUIRED when adr_type = WAIVER, else null",
       "links_to_finding_ids": ["${domainCode}-F01"],
       "links_to_action_ids": [],
+      "status": "PROPOSED",
       "kb_references": ["KB doc title"]
     }
   ]${agentDomain === 'nfr' ? `,
@@ -779,16 +789,16 @@ Include "project_context" as the first key (Solution domain only):
         // ADRs (extended fields)
         const domainAdrs: DomainAdr[] = (domainReport.adrs ?? []).map((d: any) => ({
           id:                 d.id ?? `ADR-${domainCode}-${Date.now()}`,
-          type:               d.type ?? 'DECISION',
+          adr_type:           d.adr_type ?? d.type ?? 'NEW_DECISION',
           decision:           d.decision ?? '',
           rationale:          d.rationale ?? '',
           context:            d.context,
           owner:              d.owner ?? 'enterprise_architect',
           target_date:        d.target_date ?? null,
           waiver_expiry_date: d.waiver_expiry_date ?? null,
+          status:             d.status ?? 'PROPOSED',
           // extended
           domain:             agentDomain,
-          adr_type:           d.type ?? d.adr_type ?? 'DECISION',
           title:              d.title ?? d.decision ?? null,
           options_considered: d.options_considered ?? null,
           mitigations:        d.mitigations ?? [],
