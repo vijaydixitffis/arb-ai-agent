@@ -73,6 +73,11 @@ supabase/.temp/
 *.bak
 supabase/migrations/*.bak
 
+# Ad-hoc SQL dumps at repo root
+/arb_ai_agent_complete_backup_with_data_02May26.sql
+/arb_ai_agent_complete_ddl.sql
+/arb_ai_agent_schema_only_backup_02may2026.sql
+
 # Testing
 .pytest_cache/
 .coverage
