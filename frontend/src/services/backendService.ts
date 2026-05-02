@@ -1,4 +1,4 @@
-import { reviewService } from './python/reviewService'
+import { reviewService, type DraftData } from './python/reviewService'
 import { supabaseService } from './supabaseClient'
 import { apiRequest } from './python/api'
 
@@ -26,13 +26,6 @@ interface ReviewData {
   llm_model?: string
 }
 
-interface DraftData {
-  solution_name: string
-  scope_tags: string[]
-  sa_user_id: string
-  form_data?: any
-  status?: 'draft' | 'submitted' | 'ready_for_review'
-}
 
 interface ReviewResult {
   success: boolean
