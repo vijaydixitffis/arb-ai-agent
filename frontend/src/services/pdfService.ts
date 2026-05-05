@@ -129,10 +129,24 @@ export async function generateARBReportPDF(review: ReviewData): Promise<void> {
   const aggScore = review.aggregate_rag_score ?? review.report_json?.ai_review?.aggregate_score ?? 0
   const recDecision = review.recommended_decision || review.report_json?.ai_review?.decision
   const decisionRationale = review.decision_rationale || review.report_json?.ai_review?.decision_rationale || ''
-  const domainSummaries = review.domain_summaries || {}
-  const allActions = review.actions || []
-  const allAdrs = review.adrs || []
   const formData = review.report_json?.form_data || {}
+
+  // domain_summaries is not a DB column — always read from report_json.ai_review
+  const aiReview = review.report_json?.ai_review || {}
+  const domainSummaries: Record<string, DomainSummary> =
+    (review.domain_summaries && Object.keys(review.domain_summaries).length > 0)
+      ? review.domain_summaries
+      : (aiReview.domain_summaries && Object.keys(aiReview.domain_summaries).length > 0)
+        ? aiReview.domain_summaries
+        : {}
+
+  // actions/adrs: prefer table-fetched arrays, fall back to report_json
+  const allActions: any[] = (review.actions || []).length > 0
+    ? review.actions!
+    : aiReview.actions || []
+  const allAdrs: any[] = (review.adrs || []).length > 0
+    ? review.adrs!
+    : aiReview.adrs || []
 
   const orderedSlugs = DOMAIN_ORDER.filter((s) => domainSummaries[s]).concat(
     Object.keys(domainSummaries).filter((s) => !DOMAIN_ORDER.includes(s))

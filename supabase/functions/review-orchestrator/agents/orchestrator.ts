@@ -104,9 +104,9 @@ function ragScoreToSeverity(ragScore: number): 'BLOCKER' | 'HIGH' | 'MEDIUM' | '
 }
 
 function scoreToRagLabel(score: number): string {
-  if (score >= 4) return 'GREEN'
-  if (score === 3) return 'AMBER'
-  return 'RED'
+  if (score >= 4) return 'green'
+  if (score === 3) return 'amber'
+  return 'red'
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -677,7 +677,7 @@ Include "project_context" as the first key (Solution domain only):
         const llmResponse = await callLLM({
           systemPrompt,
           userPrompt,
-          model: review.llm_model || Deno.env.get('OPENROUTER_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite',
+          model: review.llm_model || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite',
         })
 
         // 7. Parse DomainReviewPayload (handles markdown fences)

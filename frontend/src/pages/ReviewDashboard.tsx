@@ -555,10 +555,18 @@ export default function ReviewDashboard() {
   const RecIcon     = recMeta.Icon
   const aggStyle    = ragStyle(aggScore)
 
+  // Prefer table-fetched data; fall back to what's embedded in report_json.ai_review
+  const displayActions = (review?.actions || []).length > 0
+    ? review.actions
+    : review?.report_json?.ai_review?.actions || []
+  const displayAdrs = (review?.adrs || []).length > 0
+    ? review.adrs
+    : review?.report_json?.ai_review?.adrs || []
+
   const totalFindings = orderedSlugs.reduce((n, s) => n + (domainSummaries[s]?.total_findings || 0), 0)
   const totalBlockers = (review?.blockers || []).length || orderedSlugs.reduce((n, s) => n + (domainSummaries[s]?.blocker_count || 0), 0)
-  const totalActions  = (review?.actions || []).length
-  const totalADRs     = (review?.adrs    || []).length
+  const totalActions  = displayActions.length
+  const totalADRs     = displayAdrs.length
 
   // ── EA submission ─────────────────────────────────────────────────────────────
 
@@ -831,13 +839,13 @@ export default function ReviewDashboard() {
         )}
 
         {/* ── ADRs Section ── */}
-        {(review?.adrs || []).length > 0 && (
+        {displayAdrs.length > 0 && (
           <section>
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              Architecture Decision Records ({review.adrs.length})
+              Architecture Decision Records ({displayAdrs.length})
             </h2>
             <div className="grid gap-3 md:grid-cols-2">
-              {review.adrs.map((adr: any, i: number) => (
+              {displayAdrs.map((adr: any, i: number) => (
                 <div key={adr.id} className="bg-white rounded-xl border border-gray-200 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-mono font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
@@ -876,10 +884,10 @@ export default function ReviewDashboard() {
         )}
 
         {/* ── Actions Section ── */}
-        {(review?.actions || []).length > 0 && (
+        {displayActions.length > 0 && (
           <section>
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              Open Actions ({review.actions.filter((a: any) => a.status === 'open').length} open / {review.actions.length} total)
+              Open Actions ({displayActions.filter((a: any) => !a.status || a.status === 'open').length} open / {displayActions.length} total)
             </h2>
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <table className="w-full text-sm">
@@ -892,8 +900,8 @@ export default function ReviewDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {review.actions.map((ac: any) => (
-                    <tr key={ac.id} className="border-b last:border-0 hover:bg-gray-50">
+                  {displayActions.map((ac: any, idx: number) => (
+                    <tr key={ac.id || idx} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-4 py-3 text-gray-800 max-w-sm">
                         <div className="flex items-start gap-2">
                           <div>
@@ -907,7 +915,7 @@ export default function ReviewDashboard() {
                                 )}
                               </div>
                             )}
-                            <p className="line-clamp-2">{ac.title || ac.action_text}</p>
+                            <p className="line-clamp-2">{ac.title || ac.action_text || ac.action}</p>
                           </div>
                         </div>
                       </td>

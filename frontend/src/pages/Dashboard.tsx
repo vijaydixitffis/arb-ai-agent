@@ -8,7 +8,9 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
-import { FileText, Plus, Eye, CheckCircle, Clock, CheckCircle2, XCircle, ClipboardList, Briefcase, MessageSquare, Users, TrendingUp, Target, Tag, Layers, LayoutGrid, X, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react'
+import { FileText, Plus, Eye, CheckCircle, Clock, CheckCircle2, XCircle, ClipboardList, Briefcase, MessageSquare, Users, TrendingUp, Target, Tag, Layers, LayoutGrid, X, ChevronLeft, ChevronRight, ArrowRight, Loader2 } from 'lucide-react'
+
+type Notification = { type: 'success' | 'error'; message: string }
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -16,6 +18,8 @@ export default function Dashboard() {
   const [submissions, setSubmissions] = useState<any[]>([])
   const [reviews, setReviews] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [startingReviewId, setStartingReviewId] = useState<string | null>(null)
+  const [notification, setNotification] = useState<Notification | null>(null)
   // EARR Modal states
   const [isEarrModalOpen, setIsEarrModalOpen] = useState(false)
   const [activeEarrTab, setActiveEarrTab] = useState(1)
@@ -36,16 +40,28 @@ export default function Dashboard() {
     loadMetadata()
   }, [])
 
+  const showNotification = (type: 'success' | 'error', message: string) => {
+    setNotification({ type, message })
+    setTimeout(() => setNotification(null), 6000)
+  }
+
   const handleMarkReadyForReview = async (reviewId: string) => {
+    if (!confirm('Start the AI review for this submission? The analysis runs in the background — check back in a couple of minutes.')) return
     try {
-      if (confirm('Are you sure you want to mark this submission as ready for review? This will trigger the AI review process.')) {
-        await reviewService.markReadyForReview(reviewId)
-        alert('Review process initiated successfully')
-        fetchData() // Refresh the dashboard
-      }
+      setStartingReviewId(reviewId)
+      // Validate and update status to queued (fast DB call)
+      await reviewService.markReadyForReview(reviewId)
+      // Fire the orchestrator without awaiting — LLM processing takes ~30s
+      reviewService.triggerReviewOrchestrator(reviewId).catch((err: unknown) => {
+        console.error('Orchestrator error (background):', err)
+      })
+      showNotification('success', 'Review started! The AI is analysing your submission. Check back in a couple of minutes for the results.')
+      fetchData()
     } catch (error) {
-      console.error('Error marking as ready for review:', error)
-      alert(`Failed to mark as ready for review: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('Error starting review:', error)
+      showNotification('error', `Failed to start review: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setStartingReviewId(null)
     }
   }
 
@@ -96,6 +112,16 @@ export default function Dashboard() {
 
   return (
     <div className="p-8">
+      {notification && (
+        <div className={`fixed top-4 right-4 z-50 flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg max-w-md text-sm ${
+          notification.type === 'success' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'
+        }`}>
+          <span className="flex-1">{notification.message}</span>
+          <button onClick={() => setNotification(null)} className="shrink-0 ml-2 opacity-60 hover:opacity-100">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
         <p className="text-gray-600">
@@ -243,9 +269,12 @@ export default function Dashboard() {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                disabled={startingReviewId === submission.id}
                                 onClick={() => handleMarkReadyForReview(submission.id)}
                               >
-                                Ready for Review
+                                {startingReviewId === submission.id ? (
+                                  <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Starting…</>
+                                ) : 'Start Review'}
                               </Button>
                             ) : null}
                             {['approved', 'conditionally_approved', 'rejected', 'deferred', 'closed'].includes(submission.status) ? (

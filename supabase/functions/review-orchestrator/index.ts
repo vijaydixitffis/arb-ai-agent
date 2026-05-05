@@ -77,10 +77,24 @@ serve(async (req) => {
       .update({ status: 'analysing', submitted_at: new Date().toISOString() })
       .eq('id', reviewId)
 
-    // Pre-insert domain_reviews rows for progress tracking
+    // Pre-insert domain_reviews rows for progress tracking.
+    // scope_tags use agent-level keys (e.g. 'infrastructure'); expand to canonical domain slugs.
+    const agentDomainMap: Record<string, string[]> = {
+      solution:       ['solution'],
+      business:       ['business'],
+      application:    ['application', 'software'],
+      integration:    ['integration', 'api'],
+      data:           ['data'],
+      infrastructure: ['infra', 'security'],
+      devsecops:      ['devsecops', 'engg_quality'],
+      nfr:            ['nfr'],
+    }
     const scopeDomains: string[] = review.scope_tags ?? []
-    if (scopeDomains.length > 0) {
-      const domainRows = scopeDomains.map((domain: string) => ({
+    const expandedDomains = [...new Set(
+      scopeDomains.flatMap((tag: string) => agentDomainMap[tag] ?? [tag])
+    )]
+    if (expandedDomains.length > 0) {
+      const domainRows = expandedDomains.map((domain: string) => ({
         review_id:    reviewId,
         domain,
         agent_status: 'waiting',
@@ -201,7 +215,7 @@ serve(async (req) => {
           resolution_required: b.resolution_required,
           links_to_finding_id: b.links_to_finding_id ?? null,
           is_security_or_dr:  b.is_security_or_dr  ?? false,
-          status:             b.status             ?? 'OPEN',
+          status:             (b.status ?? 'OPEN').toLowerCase(),
           kb_evidence_ref:    b.kb_evidence_ref    ?? [],
         })))
       if (blkErr) console.error('blockers insert failed:', blkErr.message)
@@ -281,7 +295,6 @@ serve(async (req) => {
           title:                adr.title                ?? null,
           options_considered:   adr.options_considered   ?? null,
           mitigations:          adr.mitigations          ?? [],
-          proposed_owner:       adr.proposed_owner       ?? adr.owner ?? null,
           proposed_target_date: adr.proposed_target_date ?? adr.target_date ?? null,
           waiver_expiry_date:   adr.waiver_expiry_date   ?? null,
           links_to_finding_ids: adr.links_to_finding_ids ?? [],
@@ -310,7 +323,7 @@ serve(async (req) => {
             status:                      'open',
             action_id:                   action.action_id     ?? action.id ?? null,
             domain:                      action.domain        ?? null,
-            action_type:                 action.action_type   ?? null,
+            action_type:                 action.action_type?.toLowerCase() ?? null,
             title:                       action.title         ?? null,
             proposed_owner:              action.proposed_owner ?? action.owner_role ?? null,
             proposed_due_date:           action.proposed_due_date ?? null,
@@ -356,7 +369,7 @@ serve(async (req) => {
       metadata: {
         tokens_used:         reviewResult.tokensUsed,
         processing_time_ms:  processingTime,
-        model:               review.llm_model || Deno.env.get('OPENROUTER_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite',
+        model:               review.llm_model || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite',
         domains_reviewed:    review.scope_tags,
         findings_count:      reviewResult.findings.length,
         blockers_count:      reviewResult.blockers.length,

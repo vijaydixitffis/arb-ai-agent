@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore, initializeSession } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
@@ -9,49 +9,71 @@ import ReviewDashboard from './pages/ReviewDashboard'
 import ReviewStatus from './pages/ReviewStatus'
 import Layout from './components/layout/Layout'
 
-function LocationLogger() {
-  const location = useLocation()
-  console.log('Current location:', location.pathname)
-  return null
-}
-
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user } = useAuthStore()
-  console.log('ProtectedRoute - user:', user)
-  
+  const { user, isInitializing } = useAuthStore()
+
+  if (isInitializing) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-600 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   if (!user) {
-    console.log('ProtectedRoute - redirecting to /login')
     return <Navigate to="/login" replace />
   }
-  
-  console.log('ProtectedRoute - rendering children')
+
   return <>{children}</>
 }
 
 function App() {
+  const { user, logout, recordActivity, isSessionTimedOut } = useAuthStore()
+
   useEffect(() => {
-    // Initialize session based on configured backend type
     initializeSession()
   }, [])
 
-  console.log('App component rendering')
+  // Global activity tracking and inactivity-based session expiry
+  useEffect(() => {
+    if (!user) return
+
+    const EVENTS = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+    const handleActivity = () => {
+      // Debounce to avoid hammering localStorage on every mousemove
+      if (debounceTimer) return
+      debounceTimer = setTimeout(() => {
+        recordActivity()
+        debounceTimer = null
+      }, 5_000)
+    }
+
+    EVENTS.forEach(e => window.addEventListener(e, handleActivity, { passive: true }))
+
+    // Check session expiry every 30 seconds while the tab is open
+    const expiryCheck = setInterval(() => {
+      if (isSessionTimedOut()) {
+        logout()
+      }
+    }, 30_000)
+
+    return () => {
+      EVENTS.forEach(e => window.removeEventListener(e, handleActivity))
+      if (debounceTimer) clearTimeout(debounceTimer)
+      clearInterval(expiryCheck)
+    }
+  }, [user])
+
   return (
     <BrowserRouter basename="/arb-ai-agent">
-      <LocationLogger />
       <Routes>
-        <Route path="/login" element={
-          <>
-            {console.log('Rendering /login route')}
-            <LoginPage />
-          </>
-        } />
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={
-          <>
-            {console.log('Rendering / route with ProtectedRoute')}
-            <ProtectedRoute>
-              <Layout />
-            </ProtectedRoute>
-          </>
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
         }>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />

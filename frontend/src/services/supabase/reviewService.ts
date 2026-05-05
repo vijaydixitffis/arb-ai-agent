@@ -158,8 +158,8 @@ export const reviewService = {
     // Check form data completeness
     const formData = review.report_json?.form_data || {}
     
-    // Check required fields (support both old and new formats)
-    if (!formData.project_name && !formData.solution_name) {
+    // Check required fields (support both old and new formats, and top-level solution_name column)
+    if (!formData.project_name && !formData.solution_name && !review.solution_name) {
       missingFields.push('project_name')
       errors.push('Project name is required')
     }
@@ -174,31 +174,25 @@ export const reviewService = {
   },
 
   /**
-   * Mark review as ready for review and trigger backend
+   * Validate and queue a review for processing (does NOT await the orchestrator).
+   * Call triggerReviewOrchestrator separately as fire-and-forget.
    */
-  async markReadyForReview(reviewId: string): Promise<ReviewResult> {
-    // First validate completeness
+  async markReadyForReview(reviewId: string): Promise<void> {
     const validation = await this.validateCompleteness(reviewId)
-    
+
     if (!validation.isComplete) {
       throw new Error(`Validation failed: ${validation.errors.join(', ')}`)
     }
 
-    // Update status to submitted (this will be the trigger point)
     const { error: updateError } = await ensureSupabase()
       .from('reviews')
-      .update({ 
+      .update({
         status: 'queued',
         submitted_at: new Date().toISOString()
       })
       .eq('id', reviewId)
 
     if (updateError) throw updateError
-
-    // Trigger the review-orchestrator edge function
-    const result = await this.triggerReviewOrchestrator(reviewId)
-    
-    return result
   },
 
   /**
@@ -400,7 +394,7 @@ export const reviewService = {
   },
 
   /**
-   * Get review by ID with full details
+   * Get review by ID with full details including related table data
    */
   async getReviewById(reviewId: string) {
     const { data, error } = await ensureSupabase()
@@ -410,7 +404,23 @@ export const reviewService = {
       .single()
 
     if (error) throw error
-    return data
+
+    const [blockers, actions, adrs, nfrScorecard, domainScores] = await Promise.all([
+      ensureSupabase().from('blockers').select('*').eq('review_id', reviewId),
+      ensureSupabase().from('actions').select('*').eq('review_id', reviewId),
+      ensureSupabase().from('adrs').select('*').eq('review_id', reviewId),
+      ensureSupabase().from('nfr_scorecard').select('*').eq('review_id', reviewId),
+      ensureSupabase().from('domain_scores').select('*').eq('review_id', reviewId),
+    ])
+
+    return {
+      ...data,
+      blockers:      blockers.data      || [],
+      actions:       actions.data       || [],
+      adrs:          adrs.data          || [],
+      nfr_scorecard: nfrScorecard.data  || [],
+      domain_scores: domainScores.data  || [],
+    }
   },
 
   /**

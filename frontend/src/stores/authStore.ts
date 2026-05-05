@@ -4,8 +4,21 @@ import { supabase as supabaseClient } from '../services/supabase/supabase'
 
 const BACKEND_TYPE = import.meta.env.VITE_BACKEND_TYPE || 'supabase'
 
-// Use the conditional Supabase client from supabase.ts
 const supabase = supabaseClient
+
+const LAST_ACTIVITY_KEY = 'arb_last_activity'
+const USER_KEY = 'arb_user'
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+function recordActivity() {
+  localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString())
+}
+
+function isSessionTimedOut(): boolean {
+  const raw = localStorage.getItem(LAST_ACTIVITY_KEY)
+  if (!raw) return false
+  return Date.now() - parseInt(raw, 10) > SESSION_TIMEOUT_MS
+}
 
 interface User {
   id: string
@@ -18,8 +31,11 @@ interface AuthState {
   user: User | null
   token: string | null
   authMethod: 'demo' | 'supabase' | 'python' | null
+  isInitializing: boolean
   setAuth: (user: User, token: string, method: 'demo' | 'supabase' | 'python') => void
   logout: () => void
+  recordActivity: () => void
+  isSessionTimedOut: () => boolean
   loginWithSupabase: (email: string, password: string) => Promise<void>
   loginWithPython: (email: string, password: string) => Promise<void>
   initializeSupabaseSession: () => Promise<void>
@@ -30,16 +46,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   authMethod: null,
+  isInitializing: true,
   setAuth: (user, token, method) => set({ user, token, authMethod: method }),
+  recordActivity,
+  isSessionTimedOut,
   logout: async () => {
-    // Sign out from Supabase if logged in with Supabase
     if (get().authMethod === 'supabase' && supabase) {
       await supabase.auth.signOut()
     }
-    // Clear token for Python backend
     if (get().authMethod === 'python') {
       localStorage.removeItem('token')
+      localStorage.removeItem(USER_KEY)
     }
+    localStorage.removeItem(LAST_ACTIVITY_KEY)
     set({ user: null, token: null, authMethod: null })
   },
   loginWithSupabase: async (email: string, password: string) => {
@@ -54,9 +73,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     if (error) throw error
 
-    // Get user role from user metadata
     const role = data.user.user_metadata?.role || 'solution_architect'
-
+    recordActivity()
     set({
       user: {
         id: data.user.id,
@@ -71,54 +89,70 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loginWithPython: async (email: string, password: string) => {
     try {
       const data = await pythonServices.api.login(email, password)
-      
-      set({
-        user: {
-          id: data.user.id,
-          email: data.user.email,
-          name: data.user.name,
-          role: data.user.role,
-        },
-        token: data.access_token,
-        authMethod: 'python',
-      })
-      
-      // Store token in localStorage for Python backend
+      const user = {
+        id: data.user.id,
+        email: data.user.email,
+        name: data.user.name,
+        role: data.user.role,
+      }
+      recordActivity()
       localStorage.setItem('token', data.access_token)
+      localStorage.setItem(USER_KEY, JSON.stringify(user))
+      set({ user, token: data.access_token, authMethod: 'python' })
     } catch (error) {
       throw error
     }
   },
   initializeSupabaseSession: async () => {
-    if (!supabase) return
+    try {
+      if (!supabase) return
 
-    const { data: { session } } = await supabase.auth.getSession()
+      if (isSessionTimedOut()) {
+        await supabase.auth.signOut()
+        localStorage.removeItem(LAST_ACTIVITY_KEY)
+        return
+      }
 
-    if (session?.user) {
-      const role = session.user.user_metadata?.role || 'solution_architect'
-      set({
-        user: {
-          id: session.user.id,
-          email: session.user.email || '',
-          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
-          role,
-        },
-        token: session.access_token || null,
-        authMethod: 'supabase',
-      })
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (session?.user) {
+        const role = session.user.user_metadata?.role || 'solution_architect'
+        recordActivity()
+        set({
+          user: {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+            role,
+          },
+          token: session.access_token || null,
+          authMethod: 'supabase',
+        })
+      }
+    } finally {
+      set({ isInitializing: false })
     }
   },
   initializePythonSession: async () => {
-    const token = localStorage.getItem('token')
-    if (!token) return
+    try {
+      const token = localStorage.getItem('token')
+      const userRaw = localStorage.getItem(USER_KEY)
 
-    // For Python backend, we would need to validate the token
-    // For now, just set the token
-    set({
-      user: null, // User info would need to be fetched from backend
-      token,
-      authMethod: 'python',
-    })
+      if (!token || !userRaw) return
+
+      if (isSessionTimedOut()) {
+        localStorage.removeItem('token')
+        localStorage.removeItem(USER_KEY)
+        localStorage.removeItem(LAST_ACTIVITY_KEY)
+        return
+      }
+
+      const user = JSON.parse(userRaw) as { id: string; email: string; name: string; role: string }
+      recordActivity()
+      set({ user, token, authMethod: 'python' })
+    } finally {
+      set({ isInitializing: false })
+    }
   },
 }))
 
