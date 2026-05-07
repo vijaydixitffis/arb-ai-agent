@@ -3,7 +3,7 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useMetadataStore } from '../stores/metadataStore'
 import { Input } from '../components/ui/Input'
-import { Upload, CheckSquare, X, ArrowLeft, Send, Save, ChevronRight, Layers, Tag, Briefcase, FileText, Info } from 'lucide-react'
+import { Upload, CheckSquare, X, ArrowLeft, Send, Save, ChevronRight, Layers, Tag, Briefcase, FileText, Info, AlertTriangle } from 'lucide-react'
 import { reviewService } from '../services/backendConfig'
 
 interface DomainData {
@@ -47,6 +47,9 @@ export default function EARRSubmission() {
 
   const [selectedDomains, setSelectedDomains] = useState<string[]>([])
   const [domainData, setDomainData] = useState<Record<string, DomainData>>({})
+  const [returnDomains, setReturnDomains] = useState<string[]>([])
+  const [reworkGaps,    setReworkGaps]    = useState<string[]>([])
+  const [isReturned,    setIsReturned]    = useState(false)
 
   const [newArtefact, setNewArtefact] = useState({
     name: '',
@@ -79,6 +82,13 @@ export default function EARRSubmission() {
 
             const domainSlugs: string[] = draftData.review?.scope_tags || []
             setSelectedDomains(domainSlugs)
+
+            // EA return context
+            if (draftData.review?.status === 'returned') {
+              setIsReturned(true)
+              setReturnDomains(draftData.review?.ea_review?.return_domains || [])
+              setReworkGaps(draftData.review?.ea_review?.rework_gaps || [])
+            }
 
             const loadedDomainData: Record<string, DomainData> = formData.domain_data || {}
             setDomainData(loadedDomainData)
@@ -451,6 +461,52 @@ export default function EARRSubmission() {
 
       {/* Main content */}
       <div className="px-8 py-6">
+
+        {/* EA Return notice */}
+        {isReturned && (
+          <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-800 mb-1">
+                  Returned by EA — rework required before resubmission
+                </p>
+
+                {/* Flagged domains */}
+                {returnDomains.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-medium text-amber-700 mb-1.5">Domains to address:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {returnDomains.map(slug => (
+                        <span key={slug} className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-200 text-amber-900 text-xs font-semibold border border-amber-300 capitalize">
+                          {slug.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Rework gaps */}
+                {reworkGaps.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-amber-700 mb-1.5">EA feedback:</p>
+                    <ul className="space-y-1">
+                      {reworkGaps.map((gap, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-amber-900">
+                          <span className="w-4 h-4 mt-0.5 flex-shrink-0 rounded-full bg-amber-300 flex items-center justify-center text-[10px] font-bold">
+                            {i + 1}
+                          </span>
+                          {gap}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Domain grid */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-slate-800">
@@ -465,26 +521,36 @@ export default function EARRSubmission() {
             if (!domain) return null
 
             const data = domainData[domainSlug]
-            const artefactCount = data?.artefacts?.length || 0
+            const artefactCount  = data?.artefacts?.length || 0
             const checklistCount = Object.keys(data?.checklist || {}).length
-            const hasContent = artefactCount > 0
+            const hasContent     = artefactCount > 0
+            const needsRework    = returnDomains.includes(domainSlug)
 
             return (
               <button
                 key={domainSlug}
                 onClick={() => openDomainModal(domainSlug)}
-                className={`text-left bg-white border rounded-xl p-5 cursor-pointer transition-all hover:shadow-md group focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 ${
-                  hasContent
-                    ? 'border-l-4 border-l-emerald-400 border-slate-200 hover:border-emerald-300'
-                    : 'border-l-4 border-l-slate-300 border-slate-200 hover:border-indigo-300'
+                className={`text-left bg-white border rounded-xl p-5 cursor-pointer transition-all hover:shadow-md group focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                  needsRework
+                    ? 'border-l-4 border-l-amber-400 border-amber-200 hover:border-amber-400 focus:ring-amber-400'
+                    : hasContent
+                    ? 'border-l-4 border-l-emerald-400 border-slate-200 hover:border-emerald-300 focus:ring-indigo-400'
+                    : 'border-l-4 border-l-slate-300 border-slate-200 hover:border-indigo-300 focus:ring-indigo-400'
                 }`}
               >
                 <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-semibold text-slate-800 text-sm leading-snug group-hover:text-indigo-700 transition-colors flex items-center gap-1.5">
+                  <h3 className={`font-semibold text-sm leading-snug transition-colors flex items-center gap-1.5 ${
+                    needsRework ? 'text-amber-800 group-hover:text-amber-900' : 'text-slate-800 group-hover:text-indigo-700'
+                  }`}>
                     {domain.icon && <span className="text-base leading-none flex-shrink-0">{domain.icon}</span>}
                     {domain.name}
                   </h3>
-                  <div className="flex gap-1.5 flex-shrink-0 ml-2">
+                  <div className="flex gap-1.5 flex-shrink-0 ml-2 flex-wrap justify-end">
+                    {needsRework && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 font-semibold flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Rework
+                      </span>
+                    )}
                     {artefactCount > 0 && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">
                         {artefactCount} file{artefactCount !== 1 ? 's' : ''}
@@ -503,10 +569,16 @@ export default function EARRSubmission() {
                 )}
 
                 <div className="flex items-center justify-between mt-auto">
-                  <span className={`text-xs font-medium ${hasContent ? 'text-emerald-600' : 'text-slate-400'}`}>
-                    {hasContent ? 'Artefacts uploaded' : 'No artefacts yet'}
+                  <span className={`text-xs font-medium ${
+                    needsRework ? 'text-amber-600' : hasContent ? 'text-emerald-600' : 'text-slate-400'
+                  }`}>
+                    {needsRework && !hasContent ? 'Rework required — upload artefacts' :
+                     needsRework && hasContent  ? 'Rework required — artefacts updated' :
+                     hasContent                 ? 'Artefacts uploaded' : 'No artefacts yet'}
                   </span>
-                  <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                  <ChevronRight className={`w-4 h-4 transition-colors ${
+                    needsRework ? 'text-amber-300 group-hover:text-amber-600' : 'text-slate-300 group-hover:text-indigo-500'
+                  }`} />
                 </div>
               </button>
             )

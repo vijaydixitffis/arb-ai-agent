@@ -148,7 +148,8 @@ class EAReviewRecord(Base):
     ea_decision = Column(String, nullable=True)
     overrides = Column(JSONB, default=list)
     ea_annotations = Column(Text, nullable=True)
-    rework_gaps = Column(ARRAY(String), nullable=True)
+    rework_gaps    = Column(ARRAY(String), nullable=True)
+    return_domains = Column(ARRAY(String), nullable=True)
     final_decision = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow)
@@ -264,6 +265,26 @@ class Action(Base):
     closure_evidence = Column(Text, nullable=True)
     closed_by_ea_at = Column(DateTime(timezone=True), nullable=True)
     priority = Column(String, nullable=True)
+
+
+class EAOverride(Base):
+    __tablename__ = "ea_overrides"
+
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_id      = Column(UUID(as_uuid=True), nullable=False)
+    ea_user_id     = Column(UUID(as_uuid=True), nullable=False)
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    override_type  = Column(String, nullable=False)   # finding_severity | action_modification | adr_content | overall_decision
+    target_id      = Column(String, nullable=False)   # finding/action/ADR id, or 'overall'
+    original_value = Column(JSONB,  nullable=False)
+    override_value = Column(JSONB,  nullable=False)
+    rationale      = Column(Text,   nullable=False)
+
+    is_immutable   = Column(Boolean, nullable=False, default=False)
+    confirmed_by   = Column(UUID(as_uuid=True), nullable=True)
+    confirmed_at   = Column(DateTime(timezone=True), nullable=True)
 
 
 class AuditLog(Base):

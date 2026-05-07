@@ -40,13 +40,33 @@ class ReviewService:
 
     def create_review(self, review_data: dict) -> Review:
         """Create a new review (without artefacts - artefacts uploaded separately)"""
+        # Handle form_data that might be sent at root level
+        report_json = review_data.get('report_json', {})
+        if not report_json:
+            report_json = {}
+        
+        # If form_data exists at root level, store it in report_json.form_data
+        if 'form_data' in review_data:
+            report_json['form_data'] = review_data['form_data']
+        else:
+            # Check for individual project fields that might be at root level
+            project_fields = ['problem_statement', 'stakeholders', 'business_drivers', 'target_business_outcomes', 'ptx_gate', 'architecture_disposition']
+            form_data = report_json.get('form_data', {})
+            
+            for field in project_fields:
+                if field in review_data and field not in form_data:
+                    form_data[field] = review_data[field]
+            
+            if form_data:
+                report_json['form_data'] = form_data
+        
         review = Review(
             id=uuid.uuid4(),
             sa_user_id=uuid.UUID(review_data.get('sa_user_id')) if review_data.get('sa_user_id') else None,
             solution_name=review_data.get('solution_name'),
             scope_tags=review_data.get('scope_tags', []),
             status=self._STATUS_MAP.get(review_data.get('status', 'drafting'), review_data.get('status', 'drafting')),
-            report_json=review_data.get('report_json')
+            report_json=report_json
         )
         self.db.add(review)
         self.db.commit()
@@ -75,12 +95,11 @@ class ReviewService:
             for key, value in review_data.items():
                 if key == 'form_data':
                     existing = review.report_json or {}
-                    # Handle both None and empty objects
+                    # Always merge form_data properly
                     if value is not None and value != {}:
-                        review.report_json = {**existing, "form_data": value}
-                    elif value and not existing.get("form_data"):
-                        # Merge with existing form_data if it exists
-                        merged_form_data = {**existing.get("form_data", {}), **value}
+                        # Merge new form_data with existing form_data
+                        existing_form_data = existing.get("form_data", {})
+                        merged_form_data = {**existing_form_data, **value}
                         review.report_json = {**existing, "form_data": merged_form_data}
                 elif hasattr(review, key) and value is not None:
                     setattr(review, key, value)
@@ -130,7 +149,22 @@ class ReviewService:
                 review.report_json = result
                 review.tokens_used = result.get('total_tokens_used')
                 review.reviewed_at = datetime.utcnow()
+                
+                # Debug logging for domain_payloads
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"[REVIEW_SERVICE] Saving result with domain_payloads: {'domain_payloads' in result}")
+                if 'domain_payloads' in result:
+                    logger.info(f"[REVIEW_SERVICE] domain_payloads count: {len(result['domain_payloads'])}")
+                else:
+                    logger.warning(f"[REVIEW_SERVICE] domain_payloads missing from result. Keys: {list(result.keys())}")
+                
                 self.db.commit()
+                
+                # Verify the save
+                self.db.refresh(review)
+                saved_keys = list(review.report_json.keys()) if review.report_json else []
+                logger.info(f"[REVIEW_SERVICE] Saved report_json keys: {saved_keys}")
             
             return result
         except Exception as e:

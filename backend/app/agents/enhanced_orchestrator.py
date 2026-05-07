@@ -3,8 +3,8 @@ Enhanced ARB Orchestrator — aligned with the Pre-ARB AI Agent spec.
 
 Key design choices (matching the Supabase edge-function behaviour):
 - Sequential domain calls  (not parallel) — protects Gemini 15 RPM free-tier limit
-- No LLM synthesis step    — each domain agent produces its own DomainReviewPayload;
-                             the orchestrator aggregates them deterministically
+- Synthesis LLM step       — runs after all domain agents; rationalises cross-domain
+                             scores, gates ADRs, writes executive rationale (Tier 2)
 - report_json merging      — ai_review key added alongside existing form_data
 - rag_score based scoring  — domain score = summary.rag_score (1-5, LLM-authoritative)
 - Decision logic           — matches TypeScript determineDecision()
@@ -73,10 +73,10 @@ class EnhancedARBOrchestrator:
             if domain_slug == "solution":
                 fd = (review.report_json or {}).get("form_data", {})
                 domain_checklist["domain_metadata"].update({
-                    "problem_statement":        fd.get("problem_statement", ""),
-                    "business_drivers":         fd.get("business_drivers", []),
-                    "stakeholders":             fd.get("stakeholders", []),
-                    "target_business_outcomes": fd.get("growth_plans") or fd.get("target_business_outcomes", ""),
+                    "problem_statement":        fd.get("problem_statement") or "(not provided)",
+                    "business_drivers":         fd.get("business_drivers") or [],
+                    "stakeholders":             fd.get("stakeholders") or [],
+                    "target_business_outcomes": fd.get("growth_plans") or fd.get("target_business_outcomes") or "(not provided)",
                 })
             try:
                 payload = await self._call_domain_with_retry(
@@ -92,9 +92,13 @@ class EnhancedARBOrchestrator:
                     "payload": {
                         "domain": domain_slug,
                         "session_id": review_id,
-                        "summary": {"rag_score": 3, "rag_label": "AMBER",
-                                    "rationale": f"Validation error: {exc}",
-                                    "total_findings": 0, "blocker_count": 0, "mandatory_gaps": 0},
+                        "summary": {
+                            "rag_score": 2, "rag_label": "RED",
+                            "overall_readiness": "DEFER",
+                            "rationale": f"Domain agent error — manual review required: {exc}",
+                            "evidence_quality": "ABSENT",
+                            "total_findings": 0, "blocker_count": 0, "mandatory_gaps": 0,
+                        },
                         "blockers": [], "recommendations": [],
                         "findings": [], "actions": [], "adrs": [],
                         "error": str(exc),
@@ -106,6 +110,7 @@ class EnhancedARBOrchestrator:
 
         # ── Aggregate ─────────────────────────────────────────────────────────
         domain_scores: Dict[str, int] = {}
+        domain_summaries: Dict[str, Dict[str, Any]] = {}
         all_findings:  List[Dict[str, Any]] = []
         all_blockers:  List[Dict[str, Any]] = []
         all_recommendations: List[Dict[str, Any]] = []
@@ -121,6 +126,7 @@ class EnhancedARBOrchestrator:
             raw_score = summary.get("rag_score", 3)
             rag_score = max(1, min(5, int(raw_score)))
             domain_scores[slug] = rag_score
+            domain_summaries[slug] = summary
 
             # Findings enriched with domain slug
             for f in payload.get("findings", []):
@@ -137,8 +143,7 @@ class EnhancedARBOrchestrator:
 
         scores = list(domain_scores.values())
 
-        # Spec-correct aggregate: min of all domain scores,
-        # overridden to RED(1) if any Security/DR blocker exists.
+        # Tier-1: min aggregate, forced to 1 if any Security/DR blocker exists.
         has_security_dr_blocker = any(
             b.get("is_security_or_dr") for b in all_blockers
         )
@@ -146,6 +151,43 @@ class EnhancedARBOrchestrator:
             aggregate_score = 1
         else:
             aggregate_score = min(scores) if scores else 3
+
+        # ── Tier 2: Synthesis LLM call ────────────────────────────────────────
+        synthesis = await self._run_synthesis(
+            review_id=review_id,
+            solution_name=review.solution_name,
+            domain_scores=domain_scores,
+            all_findings=all_findings,
+            all_blockers=all_blockers,
+            all_adrs=all_adrs,
+            all_actions=all_actions,
+            aggregate_score=aggregate_score,
+        )
+        total_tokens += synthesis["tokens_used"]
+
+        # Apply synthesis score corrections (Tier-1 floors enforced inside _run_synthesis)
+        for slug, corrected in synthesis["final_domain_scores"].items():
+            domain_scores[slug] = corrected
+            # Keep domain_summaries rag_label in sync with corrected score
+            if slug in domain_summaries:
+                domain_summaries[slug]["rag_score"] = corrected
+                domain_summaries[slug]["rag_label"] = self._score_to_label(corrected)
+
+        # Recompute aggregate after corrections (Tier-1 floor still applies)
+        final_scores = list(domain_scores.values())
+        aggregate_score = min(final_scores) if final_scores else aggregate_score
+        if has_security_dr_blocker:
+            aggregate_score = 1
+
+        # Filter ADRs through synthesis gate
+        filtered_adr_ids = set(synthesis["filtered_adr_ids"])
+        all_adrs = [a for a in all_adrs if a.get("id") in filtered_adr_ids] if filtered_adr_ids else all_adrs
+
+        # Filter blockers through synthesis consolidation (deduplicate cross-domain duplicates)
+        retain_blocker_ids = synthesis.get("retain_blocker_ids")
+        if retain_blocker_ids is not None:
+            retain_set = set(retain_blocker_ids)
+            all_blockers = [b for b in all_blockers if (b.get("id") or b.get("blocker_id")) in retain_set]
 
         aggregate_rag_label = self._score_to_label(aggregate_score)
         decision            = self._determine_decision(aggregate_score, all_findings, all_blockers, domain_scores)
@@ -176,8 +218,10 @@ class EnhancedARBOrchestrator:
         logger.info(
             f"[ORCHESTRATOR] Done — decision={decision} agg={aggregate_score}({aggregate_rag_label}) "
             f"findings={len(all_findings)} blockers={len(all_blockers)} "
-            f"actions={len(all_actions)} adrs={len(all_adrs)} tokens={total_tokens} "
-            f"duration={total_duration_s:.2f}s"
+            f"actions={len(all_actions)} adrs={len(all_adrs)} "
+            f"score_corrections={len(synthesis['score_corrections'])} "
+            f"removed_adrs={len(synthesis['removed_adr_ids'])} "
+            f"tokens={total_tokens} duration={total_duration_s:.2f}s"
         )
 
         # ── Process NFR Criteria (form-based, for backward compat) ────────────
@@ -199,6 +243,9 @@ class EnhancedARBOrchestrator:
             "nfr_scorecard":        all_nfr_scorecard,
             "nfr_analysis":         nfr_analysis,
             "kb_sources_cited":     kb_sources,
+            "executive_rationale":  synthesis["executive_rationale"],
+            "score_corrections":    synthesis["score_corrections"],
+            "removed_adr_ids":      synthesis["removed_adr_ids"],
             "processed_at":         datetime.now(timezone.utc).isoformat(),
         }
 
@@ -365,6 +412,267 @@ class EnhancedARBOrchestrator:
             "category_analysis": category_analysis
         }
 
+    # ── Tier 2: Synthesis LLM call ────────────────────────────────────────────
+
+    _SYNTHESIS_SYSTEM_PROMPT = """You are a senior Principal Enterprise Architect with 20 years of experience
+chairing ARB panels. You are writing the final synthesis of an AI-assisted architectural review. All domain
+agents have completed their assessments and you are now producing the executive view.
+
+ARB SCOPE REMINDER: This review covers architectural design completeness only — not operational readiness,
+test results, or deployed-state evidence. Your synthesis must stay within this scope.
+
+YOUR FIVE RESPONSIBILITIES:
+
+1. SCORE RATIONALISATION — review domain scores for cross-cutting consistency:
+   • You MAY LOWER a domain score if cross-domain evidence reveals a compounding risk not visible in
+     isolation (e.g. Security RED but DR domain GREEN — DR should reflect the security gap).
+   • You MAY NEVER RAISE Security or DR/HA domain scores above RED (rag_score 2) unless the domain
+     agent's own findings contain positive architectural evidence supporting a higher score.
+   • For all other domains you may raise or lower scores by at most 1 point when cross-domain evidence
+     clearly supports it. Document every correction with a specific reason.
+   • Output scoreCorrections[] for every change. If no corrections needed, output an empty array.
+
+2. BLOCKER CONSOLIDATION — deduplicate cross-domain blockers:
+   Multiple domain agents independently assess overlapping concerns — it is expected that the same
+   architectural gap (e.g. missing RBAC design) may appear as a blocker in both the infrastructure
+   and NFR domains. Your job is to consolidate these into one canonical blocker per distinct issue.
+   
+   EXAMPLES OF DUPLICATE BLOCKERS TO CONSOLIDATE:
+   • Infrastructure: "Missing Authentication & Authorization (AUTHN_AUTHZ) design" 
+     + NFR: "Missing RBAC/IAM scope for EDMS service accounts" → SAME ISSUE → keep one
+   • Infrastructure: "Incomplete Key Vault and Secrets Management (KEY_VAULT_SECRETS) design"
+     + NFR: "Missing Key Vault and Secrets Management design for EDMS" → SAME ISSUE → keep one
+   • Infrastructure: "Absence of detailed PKI and Encryption (PKI_ENCRYPTION) design"
+     + NFR: "Absent encryption-at-rest and in-transit design for EDMS" → SAME ISSUE → keep one
+   
+   CONSOLIDATION RULES:
+   • Compare all blockers by subject matter (title + description), not by ID.
+   • Look for semantic similarity: same control area (auth, encryption, secrets, etc.) even if phrased differently.
+   • Where two or more blockers describe the same underlying gap, retain ONE — prefer the one with
+     the most specific description or from the domain most architecturally responsible for it.
+   • Output retainBlockerIds[] — the exact IDs of the blockers to keep after consolidation.
+     All blocker IDs not in this list are treated as redundant duplicates and discarded.
+   • If all blockers are distinct issues, retainBlockerIds must include every blocker ID.
+   • Never drop a blocker to soften the outcome — only consolidate genuine cross-domain duplicates.
+
+3. ADR GATE — apply the architectural-choice test to every ADR in the input:
+   RETAIN an ADR if it records: a deliberate design decision between viable options, a technology
+   deviation from EA standards, or a formal exception (WAIVER) for a genuine design risk.
+   REMOVE an ADR if it was generated merely because documentation or a plan is absent — those should
+   be actions, not ADRs. A missing VAPT plan → action. A decision to skip encryption at rest → ADR.
+   Output filteredAdrIds (retained) and removedAdrIds (removed).
+
+4. EXECUTIVE RATIONALE — write 4–6 sentences as a senior EA would speak at an ARB panel:
+   Write in first-person plural ("The panel notes…", "We find…", "The architecture demonstrates…").
+   Sound like a considered human judgement, not a system-generated checklist.
+   • Open with what the solution gets right — acknowledge genuine strengths before gaps.
+   • Describe the critical gaps in concrete terms — name the specific controls or design elements
+     missing, not just the domain category. Reference the solution by name.
+   • If there are blockers, explain WHY they prevent approval — the business or security consequence,
+     not just that a standard is violated.
+   • Close with a clear path forward: what the SA team must produce, and at what level of completeness,
+     before the panel can reconsider.
+   Avoid: bullet-point-in-prose style, hedging language ("it appears", "may be"), repeating the same
+   gap twice with different words, and generic phrases like "the solution lacks documentation".
+
+5. FINAL DECISION — one of: approve | approve_with_conditions | defer | reject
+   Apply these Tier-1 floors using the RETAINED blockers after consolidation:
+   • Any Security or DR/HA blocker (is_security_or_dr = true) at rag_score ≤ 1 → reject
+   • Any Security or DR/HA blocker at rag_score 2 → defer
+   • Non-security/DR blockers or score ≤ 3 → approve_with_conditions
+   • Score ≥ 4 and no blockers → approve
+
+Respond ONLY with a valid JSON object. No preamble, no markdown outside the JSON."""
+
+    async def _run_synthesis(
+        self,
+        review_id: str,
+        solution_name: str,
+        domain_scores: Dict[str, int],
+        all_findings: List[Dict[str, Any]],
+        all_blockers: List[Dict[str, Any]],
+        all_adrs: List[Dict[str, Any]],
+        all_actions: List[Dict[str, Any]],
+        aggregate_score: int,
+    ) -> Dict[str, Any]:
+        """Run Tier-2 synthesis LLM call. Returns safe fallback on any error."""
+
+        def _fallback(reason: str) -> Dict[str, Any]:
+            has_sec_dr = any(b.get("is_security_or_dr") for b in all_blockers)
+            has_any    = bool(all_blockers)
+            if aggregate_score >= 4 and not has_any:
+                fd = "approve"
+            elif aggregate_score <= 1 and has_sec_dr:
+                fd = "reject"
+            elif has_sec_dr:
+                fd = "defer"
+            elif has_any or aggregate_score <= 3:
+                fd = "approve_with_conditions"
+            else:
+                fd = "approve"
+            return {
+                "final_domain_scores": dict(domain_scores),
+                "score_corrections":   [],
+                "retain_blocker_ids":  None,  # None = keep all (fallback doesn't deduplicate)
+                "filtered_adr_ids":    [a["id"] for a in all_adrs if a.get("id")],
+                "removed_adr_ids":     [],
+                "executive_rationale": f"Synthesis unavailable ({reason}). Domain scores used as-is.",
+                "final_decision":      fd,
+                "tokens_used":         0,
+            }
+
+        # Build user prompt
+        score_lines = "\n".join(
+            f"  {d:<20} rag_score={s}" for d, s in domain_scores.items()
+        )
+        blocker_lines = "\n".join(
+            f"  id={b.get('id', b.get('blocker_id', '?'))} "
+            f"[{'SEC/DR' if b.get('is_security_or_dr') else 'OTHER '}] "
+            f"{b.get('domain_slug', b.get('domain', ''))} — {b.get('title', '')} "
+            f"(is_security_or_dr={b.get('is_security_or_dr')})"
+            for b in all_blockers
+        ) or "  (none)"
+        adr_lines = "\n".join(
+            f"  {a.get('id', '?')} | {a.get('adr_type', '?')} | {a.get('title', a.get('decision', ''))}"
+            for a in all_adrs
+        ) or "  (none)"
+        finding_summary = "\n".join(
+            f"  {f.get('id', '?')} rag={f.get('rag_score', '?')} [{f.get('check_category', '')}] {f.get('title', '')}"
+            for f in all_findings if (f.get("rag_score") or 5) <= 3
+        )[:3000] or "  (no RED/AMBER findings)"
+
+        user_prompt = f"""== SYNTHESIS INPUT ==
+review_id:       {review_id}
+solution_name:   {solution_name}
+aggregate_score: {aggregate_score}
+
+== DOMAIN SCORES FROM DOMAIN AGENTS ==
+{score_lines}
+
+== BLOCKERS ==
+{blocker_lines}
+
+== ADRs TO GATE ==
+{adr_lines}
+
+== RED/AMBER FINDINGS ==
+{finding_summary}
+
+== OUTPUT SCHEMA ==
+{{
+  "scoreCorrections": [
+    {{"domain": "security", "original_score": 2, "corrected_score": 2, "reason": "No change"}}
+  ],
+  "retainBlockerIds": ["INF-BLK-01", "NFR-BLK-05"],
+  "filteredAdrIds": ["ADR-SOL-01"],
+  "removedAdrIds":  [],
+  "executiveRationale": "4-6 sentence paragraph written in EA voice for the ARB panel",
+  "finalDecision": "approve | approve_with_conditions | defer | reject"
+}}"""
+
+        logger.info(
+            f"[SYNTHESIS] Starting synthesis review={review_id} "
+            f"domains={list(domain_scores.keys())} blockers={len(all_blockers)} adrs={len(all_adrs)}"
+        )
+
+        try:
+            response = await self.domain_agent.llm_service.generate_completion(
+                prompt=user_prompt,
+                system_prompt=self._SYNTHESIS_SYSTEM_PROMPT,
+                temperature=0.3,
+                max_tokens=4096,
+                timeout=60,
+            )
+        except Exception as exc:
+            logger.warning(f"[SYNTHESIS] LLM call failed ({exc}) — using fallback")
+            return _fallback(f"LLM error: {exc}")
+
+        raw = response.get("content", "")
+        tokens_used = response.get("tokens_used", 0)
+
+        try:
+            parsed = self.domain_agent.llm_service.parse_json_from_llm(raw)
+        except Exception as exc:
+            logger.warning(f"[SYNTHESIS] JSON parse failed ({exc}) — using fallback")
+            return _fallback("parse failure")
+
+        # Apply score corrections with Tier-1 floors
+        final_domain_scores = dict(domain_scores)
+        score_corrections: List[Dict[str, Any]] = []
+        for c in (parsed.get("scoreCorrections") or []):
+            dom       = c.get("domain", "")
+            orig      = domain_scores.get(dom, c.get("original_score", 3))
+            corrected = max(1, min(5, int(c.get("corrected_score", orig))))
+            is_sec_dr = dom in ("security", "infrastructure")
+            if is_sec_dr and corrected > orig:
+                logger.warning(f"[SYNTHESIS] Blocked raising {dom} score {orig}→{corrected}")
+                continue
+            if corrected != orig:
+                final_domain_scores[dom] = corrected
+                score_corrections.append({
+                    "domain": dom, "original_score": orig,
+                    "corrected_score": corrected, "reason": c.get("reason", ""),
+                })
+
+        # Blocker consolidation — filter to canonical set if synthesis provided retainBlockerIds
+        all_blocker_ids = {b.get("id", b.get("blocker_id")) for b in all_blockers if b.get("id") or b.get("blocker_id")}
+        raw_retain = parsed.get("retainBlockerIds")
+        if raw_retain and isinstance(raw_retain, list):
+            retain_set = {i for i in raw_retain if i in all_blocker_ids}
+            # Safety: if synthesis returned an empty list (shouldn't happen), keep all
+            retain_blocker_ids = list(retain_set) if retain_set else list(all_blocker_ids)
+        else:
+            retain_blocker_ids = None  # keep all
+
+        # ADR gate
+        all_adr_ids     = {a["id"] for a in all_adrs if a.get("id")}
+        raw_filtered    = parsed.get("filteredAdrIds") or list(all_adr_ids)
+        raw_removed     = parsed.get("removedAdrIds")  or []
+        filtered_adr_ids = [i for i in raw_filtered if i in all_adr_ids]
+        removed_adr_ids  = [i for i in raw_removed  if i in all_adr_ids]
+
+        # Recompute final decision with Tier-1 floors (use retained blockers)
+        retained_blockers = (
+            [b for b in all_blockers if (b.get("id") or b.get("blocker_id")) in retain_blocker_ids]
+            if retain_blocker_ids is not None else all_blockers
+        )
+        final_scores  = list(final_domain_scores.values())
+        final_agg     = min(final_scores) if final_scores else aggregate_score
+        has_sec_dr    = any(b.get("is_security_or_dr") for b in retained_blockers)
+        has_any       = bool(retained_blockers)
+        if has_sec_dr:
+            final_agg = 1
+        if final_agg >= 4 and not has_any:
+            final_decision = "approve"
+        elif final_agg <= 1 and has_sec_dr:
+            final_decision = "reject"
+        elif has_sec_dr:
+            final_decision = "defer"
+        elif has_any or final_agg <= 3:
+            final_decision = "approve_with_conditions"
+        else:
+            final_decision = "approve"
+
+        executive_rationale = parsed.get("executiveRationale", "")
+
+        dropped_blockers = len(all_blocker_ids) - len(retain_blocker_ids) if retain_blocker_ids is not None else 0
+        logger.info(
+            f"[SYNTHESIS] Done — final_decision={final_decision} "
+            f"corrections={len(score_corrections)} removed_adrs={len(removed_adr_ids)} "
+            f"dropped_duplicate_blockers={dropped_blockers} tokens={tokens_used}"
+        )
+
+        return {
+            "final_domain_scores": final_domain_scores,
+            "score_corrections":   score_corrections,
+            "retain_blocker_ids":  retain_blocker_ids,
+            "filtered_adr_ids":    filtered_adr_ids,
+            "removed_adr_ids":     removed_adr_ids,
+            "executive_rationale": executive_rationale,
+            "final_decision":      final_decision,
+            "tokens_used":         tokens_used,
+        }
+
     # ── Retry wrapper ─────────────────────────────────────────────────────────
 
     async def _call_domain_with_retry(
@@ -448,18 +756,26 @@ class EnhancedARBOrchestrator:
         blockers: List[Dict[str, Any]],
         domain_scores: Dict[str, int],
     ) -> str:
-        """Spec-correct decision logic matching the orchestrator aggregation rules."""
+        """Spec-correct decision logic matching the Tier-1 gate rules.
+
+        Security/DR architecture blockers are hard gates (reject/defer).
+        Non-security/DR design blockers are conditions (approve_with_conditions).
+        """
         has_security_dr_blocker = any(b.get("is_security_or_dr") for b in blockers)
+        has_non_sec_dr_blocker  = any(not b.get("is_security_or_dr") for b in blockers)
         blocker_count = len(blockers)
 
-        # Score 5 or 4 → APPROVE (minor tracked actions only)
+        # Score 5 or 4, no blockers → APPROVE
         if aggregate_score >= 4 and blocker_count == 0:
             return "approve"
-        # Score 1 with Security/DR blocker → REJECT
+        # Security/DR blocker at score 1 → REJECT (unresolvable design gap)
         if aggregate_score <= 1 and has_security_dr_blocker:
             return "reject"
-        # Score 1 other blocker → DEFER
-        if aggregate_score <= 1 or blocker_count > 0:
+        # Security/DR blocker at score 2+ → DEFER (needs design rework)
+        if has_security_dr_blocker:
             return "defer"
-        # Score 2 or 3 → APPROVE_WITH_CONDITIONS
-        return "approve_with_conditions"
+        # Non-security/DR blocker or score 2–3 → APPROVE_WITH_CONDITIONS
+        if has_non_sec_dr_blocker or aggregate_score <= 3:
+            return "approve_with_conditions"
+        # Score 4+ no blockers (caught above) — fallback
+        return "approve"

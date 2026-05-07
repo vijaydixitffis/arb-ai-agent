@@ -4,13 +4,14 @@ import {
   ChevronLeft, X, CheckCircle, XCircle, AlertCircle, Clock,
   AlertTriangle, Shield, Database, Server, Code, GitMerge,
   Layers, Activity, Briefcase, ChevronRight, FileText, Zap, Download,
-  Flag, Award, Plus, Trash2,
+  Flag, Award, Plus, Trash2, Pencil, Check,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Textarea } from '../components/ui/Textarea'
 import { reviewService } from '../services/backendConfig'
 import { generateARBReportPDF } from '../services/pdfService'
 import { toARBRef } from '../utils/reviewRef'
+import { useAuthStore } from '../stores/authStore'
 
 // ── Domain metadata ──────────────────────────────────────────────────────────
 
@@ -87,6 +88,150 @@ function SeverityBadge({ ragScore }: { ragScore?: number }) {
   )
 }
 
+// ── EA Override constants ─────────────────────────────────────────────────────
+
+const SCORE_OPTIONS = [
+  { value: 5, label: '5 — GREEN (Full Compliance)' },
+  { value: 4, label: '4 — GREEN+ (Minor Gaps)' },
+  { value: 3, label: '3 — AMBER (Significant Gaps)' },
+  { value: 2, label: '2 — RED (Critical Gap)' },
+  { value: 1, label: '1 — BLOCKER (Cannot Proceed)' },
+]
+
+const PRIORITY_OPTIONS = [
+  { value: 'CRITICAL', label: 'CRITICAL' },
+  { value: 'HIGH',     label: 'HIGH' },
+  { value: 'MEDIUM',   label: 'MEDIUM' },
+  { value: 'LOW',      label: 'LOW' },
+]
+
+const ADR_STATUS_OPTIONS = [
+  { value: 'accepted',    label: 'Accepted' },
+  { value: 'rejected',    label: 'Rejected' },
+  { value: 'conditional', label: 'Conditional' },
+  { value: 'superseded',  label: 'Superseded' },
+  { value: 'pending',     label: 'Pending' },
+]
+
+// ── EAOverrideWidget ──────────────────────────────────────────────────────────
+
+function EAOverrideWidget({
+  label, overrideType, targetId, currentValue, reviewId,
+  options, existingOverride, onSaved,
+}: {
+  label: string
+  overrideType: string
+  targetId: string
+  currentValue: any
+  reviewId: string
+  options: { value: any; label: string }[]
+  existingOverride?: any
+  onSaved: (override: any) => void
+}) {
+  const [open,      setOpen]      = useState(false)
+  const [value,     setValue]     = useState('')
+  const [rationale, setRationale] = useState('')
+  const [saving,    setSaving]    = useState(false)
+  const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '/api/v1'
+
+  const handleSave = async () => {
+    if (!value || rationale.trim().length < 10) return
+    setSaving(true)
+    try {
+      const parsedValue = options.find(o => String(o.value) === value)?.value ?? value
+      const resp = await fetch(`${apiBase}/reviews/${reviewId}/overrides`, {
+        method:  'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization:  `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify({
+          override_type:  overrideType,
+          target_id:      targetId,
+          original_value: currentValue,
+          override_value: parsedValue,
+          rationale:      rationale.trim(),
+        }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      const result = await resp.json()
+      onSaved(result)
+      setOpen(false)
+      setValue('')
+      setRationale('')
+    } catch (e: any) {
+      alert(`Override failed: ${e.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (existingOverride) {
+    const overrideLabel = options.find(o => String(o.value) === String(existingOverride.override_value))?.label
+      ?? String(existingOverride.override_value)
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold flex items-center gap-1">
+          <Award className="w-3 h-3" /> EA Override: {overrideLabel}
+        </span>
+        <span className="text-xs text-gray-400 italic truncate max-w-xs">{existingOverride.rationale}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="text-xs px-2 py-0.5 rounded border border-purple-200 text-purple-600 hover:bg-purple-50 flex items-center gap-1 font-medium transition-colors"
+        >
+          <Pencil className="w-3 h-3" /> Override
+        </button>
+      ) : (
+        <div className="border border-purple-200 rounded-lg p-3 bg-purple-50 space-y-2 mt-1">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-purple-700">{label}</p>
+            <button onClick={() => setOpen(false)} className="text-purple-400 hover:text-purple-600">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+          <select
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            className="w-full text-xs border border-purple-200 rounded px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-300"
+          >
+            <option value="">Select new value…</option>
+            {options.map(o => (
+              <option key={String(o.value)} value={String(o.value)}>{o.label}</option>
+            ))}
+          </select>
+          <Textarea
+            value={rationale}
+            onChange={e => setRationale(e.target.value)}
+            placeholder="Rationale for override (min 10 characters required)…"
+            rows={2}
+            className="text-xs"
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saving || !value || rationale.trim().length < 10}
+              className="text-xs bg-purple-600 hover:bg-purple-700 text-white"
+            >
+              {saving ? 'Saving…' : 'Save Override'}
+            </Button>
+            <span className={`text-xs ${rationale.trim().length < 10 ? 'text-red-400' : 'text-green-600'}`}>
+              {rationale.trim().length}/10
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Domain Detail Panel ───────────────────────────────────────────────────────
 
 interface DomainSummary {
@@ -119,14 +264,20 @@ function domainPrefix(slug: string) {
 function seq(n: number) { return String(n + 1).padStart(2, '0') }
 
 function DomainDetailPanel({
-  slug, summary, onClose,
+  slug, summary, onClose, reviewId, isEA, eaOverrides, onOverrideSaved,
 }: {
   slug: string
   summary: DomainSummary
   onClose: () => void
+  reviewId: string
+  isEA: boolean
+  eaOverrides: Record<string, any>
+  onOverrideSaved: (override: any) => void
 }) {
   const meta  = DOMAIN_META[slug] || { label: slug, Icon: FileText }
-  const style = ragStyle(summary.score)
+  const domainOverride = eaOverrides[`domain:${slug}`]
+  const effectiveScore = domainOverride ? Number(domainOverride.override_value) : summary.score
+  const style = ragStyle(effectiveScore)
   const Icon  = meta.Icon
 
   return (
@@ -146,7 +297,10 @@ function DomainDetailPanel({
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <span className={`w-2 h-2 rounded-full ${style.dot}`} />
                 <span className={`text-xs font-semibold ${style.text}`}>
-                  {summary.rag_label} — Score {summary.score}/5
+                  {domainOverride
+                    ? `EA Override: ${SCORE_OPTIONS.find(o => o.value === effectiveScore)?.label?.split(' — ')[1] ?? effectiveScore} — Score ${effectiveScore}/5`
+                    : `${summary.rag_label} — Score ${summary.score}/5`
+                  }
                 </span>
                 {summary.evidence_quality && (
                   <span className={`text-xs px-2 py-0.5 rounded font-medium ${evidenceQualityStyle(summary.evidence_quality)}`}>
@@ -154,6 +308,21 @@ function DomainDetailPanel({
                   </span>
                 )}
               </div>
+              {/* Domain score override widget */}
+              {isEA && (
+                <div className="mt-2">
+                  <EAOverrideWidget
+                    label="Override Domain Score"
+                    overrideType="finding_severity"
+                    targetId={`domain:${slug}`}
+                    currentValue={summary.score}
+                    reviewId={reviewId}
+                    options={SCORE_OPTIONS}
+                    existingOverride={domainOverride}
+                    onSaved={onOverrideSaved}
+                  />
+                </div>
+              )}
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/60 rounded-lg transition-colors">
@@ -285,43 +454,67 @@ function DomainDetailPanel({
             <section>
               <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Required Actions</h3>
               <div className="space-y-2">
-                {summary.actions.map((a, i) => (
-                  <div key={i} className="border border-gray-200 rounded-lg p-3 bg-white">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <div>
-                        <span className="text-xs font-mono text-gray-400">{a.action_id || `${domainPrefix(slug)}-A${seq(i)}`}</span>
-                        {a.title && <p className="text-xs font-medium text-gray-700 mt-0.5">{a.title}</p>}
+                {summary.actions.map((a, i) => {
+                  const actionKey = a.id || a.action_id || `${domainPrefix(slug)}-A${seq(i)}`
+                  const actionOverride = eaOverrides[actionKey]
+                  const effectivePriority = actionOverride ? actionOverride.override_value : a.priority
+                  return (
+                    <div key={i} className="border border-gray-200 rounded-lg p-3 bg-white">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div>
+                          <span className="text-xs font-mono text-gray-400">{a.action_id || `${domainPrefix(slug)}-A${seq(i)}`}</span>
+                          {a.title && <p className="text-xs font-medium text-gray-700 mt-0.5">{a.title}</p>}
+                        </div>
+                        <div className="flex gap-1 flex-wrap justify-end">
+                          {a.action_type && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">{a.action_type}</span>
+                          )}
+                          {effectivePriority && (
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                              effectivePriority === 'CRITICAL' ? 'bg-red-200 text-red-800' :
+                              effectivePriority === 'HIGH'     ? 'bg-red-100 text-red-700' :
+                              effectivePriority === 'MEDIUM'   ? 'bg-amber-100 text-amber-700' :
+                              'bg-gray-100 text-gray-600'
+                            }`}>
+                              {actionOverride ? <><Award className="w-2.5 h-2.5 inline mr-0.5" />{effectivePriority}</> : effectivePriority}
+                            </span>
+                          )}
+                          {a.is_conditional_approval_gate && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">Gate</span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex gap-1">
-                        {a.action_type && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">{a.action_type}</span>
-                        )}
-                        {a.priority && (
-                          <span className={`text-xs px-2 py-0.5 rounded font-medium ${a.priority === 'HIGH' ? 'bg-red-100 text-red-700' : a.priority === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {a.priority}
-                          </span>
-                        )}
-                        {a.is_conditional_approval_gate && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">Gate</span>
-                        )}
-                      </div>
+                      <p className="text-sm text-gray-800">{a.action_text || a.action}</p>
+                      {a.verification_method && (
+                        <p className="text-xs text-gray-500 mt-1">Verify: <span className="font-medium">{a.verification_method}</span></p>
+                      )}
+                      {(a.owner_role || a.proposed_owner || a.due_days || a.proposed_due_date) && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {(a.owner_role || a.proposed_owner) && (
+                            <span>Owner: <span className="font-medium">{a.owner_role || a.proposed_owner}</span></span>
+                          )}
+                          {(a.due_days || a.proposed_due_date) && (
+                            <span className="ml-2">Due: <span className="font-medium">{a.proposed_due_date || `${a.due_days}d`}</span></span>
+                          )}
+                        </p>
+                      )}
+                      {isEA && (
+                        <div className="mt-2 pt-2 border-t border-gray-100">
+                          <EAOverrideWidget
+                            label="Override Action Priority"
+                            overrideType="action_modification"
+                            targetId={actionKey}
+                            currentValue={a.priority}
+                            reviewId={reviewId}
+                            options={PRIORITY_OPTIONS}
+                            existingOverride={actionOverride}
+                            onSaved={onOverrideSaved}
+                          />
+                        </div>
+                      )}
                     </div>
-                    <p className="text-sm text-gray-800">{a.action_text || a.action}</p>
-                    {a.verification_method && (
-                      <p className="text-xs text-gray-500 mt-1">Verify: <span className="font-medium">{a.verification_method}</span></p>
-                    )}
-                    {(a.owner_role || a.proposed_owner || a.due_days || a.proposed_due_date) && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        {(a.owner_role || a.proposed_owner) && (
-                          <span>Owner: <span className="font-medium">{a.owner_role || a.proposed_owner}</span></span>
-                        )}
-                        {(a.due_days || a.proposed_due_date) && (
-                          <span className="ml-2">Due: <span className="font-medium">{a.proposed_due_date || `${a.due_days}d`}</span></span>
-                        )}
-                      </p>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </section>
           )}
@@ -331,30 +524,59 @@ function DomainDetailPanel({
             <section>
               <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Architecture Decision Records</h3>
               <div className="space-y-2">
-                {summary.adrs.map((adr, i) => (
-                  <div key={i} className="border border-blue-100 rounded-lg p-3 bg-blue-50">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-mono font-semibold text-blue-700">{adr.adr_id || `ADR-${domainPrefix(slug)}-${seq(i)}`}</span>
-                      <div className="flex gap-1">
-                        {adr.domain && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">
-                            {adr.domain}
-                          </span>
-                        )}
-                        {(adr.adr_type || adr.type) && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
-                            {adr.adr_type || adr.type}
-                          </span>
-                        )}
+                {summary.adrs.map((adr, i) => {
+                  const adrKey = adr.id || adr.adr_id || `ADR-${domainPrefix(slug)}-${seq(i)}`
+                  const adrOverride = eaOverrides[adrKey]
+                  const effectiveStatus = adrOverride ? String(adrOverride.override_value) : adr.status
+                  return (
+                    <div key={i} className="border border-blue-100 rounded-lg p-3 bg-blue-50">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-mono font-semibold text-blue-700">{adr.adr_id || `ADR-${domainPrefix(slug)}-${seq(i)}`}</span>
+                        <div className="flex gap-1 flex-wrap justify-end">
+                          {adr.domain && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">
+                              {adr.domain}
+                            </span>
+                          )}
+                          {(adr.adr_type || adr.type) && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                              {adr.adr_type || adr.type}
+                            </span>
+                          )}
+                          {effectiveStatus && (
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                              effectiveStatus === 'accepted'    ? 'bg-green-100 text-green-700' :
+                              effectiveStatus === 'rejected'    ? 'bg-red-100 text-red-700'     :
+                              effectiveStatus === 'conditional' ? 'bg-amber-100 text-amber-700' :
+                              'bg-gray-100 text-gray-600'
+                            }`}>
+                              {adrOverride && <Award className="w-2.5 h-2.5 inline mr-0.5" />}{effectiveStatus}
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      <p className="text-sm font-medium text-gray-800">{adr.title || adr.decision}</p>
+                      {adr.rationale && <p className="text-xs text-gray-600 mt-1">{adr.rationale}</p>}
+                      {adr.waiver_expiry_date && (
+                        <p className="text-xs text-amber-700 mt-1 font-medium">Waiver expires: {adr.waiver_expiry_date}</p>
+                      )}
+                      {isEA && (
+                        <div className="mt-2 pt-2 border-t border-blue-200">
+                          <EAOverrideWidget
+                            label="Override ADR Status"
+                            overrideType="adr_content"
+                            targetId={adrKey}
+                            currentValue={adr.status}
+                            reviewId={reviewId}
+                            options={ADR_STATUS_OPTIONS}
+                            existingOverride={adrOverride}
+                            onSaved={onOverrideSaved}
+                          />
+                        </div>
+                      )}
                     </div>
-                    <p className="text-sm font-medium text-gray-800">{adr.title || adr.decision}</p>
-                    {adr.rationale && <p className="text-xs text-gray-600 mt-1">{adr.rationale}</p>}
-                    {adr.waiver_expiry_date && (
-                      <p className="text-xs text-amber-700 mt-1 font-medium">Waiver expires: {adr.waiver_expiry_date}</p>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </section>
           )}
@@ -469,6 +691,7 @@ function DomainCard({
 export default function ReviewDashboard() {
   const navigate         = useNavigate()
   const { submissionId } = useParams<{ submissionId: string }>()
+  const { user }         = useAuthStore()
 
   const [review,         setReview]         = useState<any>(null)
   const [loading,        setLoading]        = useState(true)
@@ -478,7 +701,12 @@ export default function ReviewDashboard() {
   const [eaAnnotations,  setEaAnnotations]  = useState<string>('')
   const [reworkGaps,     setReworkGaps]     = useState<string[]>([])
   const [reworkGapInput, setReworkGapInput] = useState<string>('')
+  const [returnDomains,  setReturnDomains]  = useState<string[]>([])
   const [submitting,     setSubmitting]     = useState(false)
+  const [eaOverrides,    setEaOverrides]    = useState<Record<string, any>>({})
+
+  const isEA = ['enterprise_architect', 'arb_admin'].includes(user?.role || '')
+  const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '/api/v1'
 
   useEffect(() => {
     if (!submissionId) return
@@ -486,6 +714,28 @@ export default function ReviewDashboard() {
       .then(data => { setReview(data); setLoading(false) })
       .catch(err  => { setError(err.message || 'Failed to load review'); setLoading(false) })
   }, [submissionId])
+
+  // Load existing EA overrides when review is available and user is EA/admin
+  useEffect(() => {
+    if (!submissionId || !isEA) return
+    fetch(`${apiBase}/reviews/${submissionId}/overrides`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        const byTargetId: Record<string, any> = {}
+        Object.values(data.overrides as Record<string, any[]>).flat().forEach((o: any) => {
+          byTargetId[o.target_id] = o
+        })
+        setEaOverrides(byTargetId)
+      })
+      .catch(() => {})
+  }, [submissionId, isEA])
+
+  const handleOverrideSaved = (override: any) => {
+    setEaOverrides(prev => ({ ...prev, [override.target_id]: override }))
+  }
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -599,7 +849,9 @@ export default function ReviewDashboard() {
       if (eaMode === 'CONDITIONALLY_APPROVE') {
         if (!eaAnnotations.trim()) { alert('Provide conditions / rationale for conditional approval'); setSubmitting(false); return }
       } else if (eaMode === 'RETURN') {
+        if (returnDomains.length === 0) { alert('Select at least one domain that needs rework'); setSubmitting(false); return }
         if (reworkGaps.length === 0) { alert('Add at least one rework gap before returning'); setSubmitting(false); return }
+        payload.return_domains = returnDomains
         payload.rework_gaps = reworkGaps
       } else if (eaMode === 'DEFER') {
         if (eaAnnotations.trim().length < 50) { alert('Deferral requires a rationale of at least 50 characters'); setSubmitting(false); return }
@@ -845,40 +1097,59 @@ export default function ReviewDashboard() {
               Architecture Decision Records ({displayAdrs.length})
             </h2>
             <div className="grid gap-3 md:grid-cols-2">
-              {displayAdrs.map((adr: any, i: number) => (
-                <div key={adr.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-                      {adr.adr_id || `ADR-${seq(i)}`}
-                    </span>
-                    <div className="flex gap-1">
-                      {(adr.adr_type) && (
-                        <span className="text-xs px-2 py-0.5 rounded font-medium bg-blue-50 text-blue-600">
-                          {adr.adr_type}
-                        </span>
-                      )}
-                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                        adr.status === 'accepted'    ? 'bg-green-100 text-green-700'  :
-                        adr.status === 'rejected'    ? 'bg-red-100 text-red-700'      :
-                        adr.status === 'conditional' ? 'bg-amber-100 text-amber-700'  :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        {adr.status}
+              {displayAdrs.map((adr: any, i: number) => {
+                const adrKey = adr.id || adr.adr_id || `ADR-${seq(i)}`
+                const adrOverride = eaOverrides[adrKey]
+                const effectiveStatus = adrOverride ? String(adrOverride.override_value) : adr.status
+                return (
+                  <div key={adr.id || i} className="bg-white rounded-xl border border-gray-200 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-mono font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                        {adr.adr_id || `ADR-${seq(i)}`}
                       </span>
+                      <div className="flex gap-1 flex-wrap justify-end">
+                        {adr.adr_type && (
+                          <span className="text-xs px-2 py-0.5 rounded font-medium bg-blue-50 text-blue-600">
+                            {adr.adr_type}
+                          </span>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium flex items-center gap-0.5 ${
+                          effectiveStatus === 'accepted'    ? 'bg-green-100 text-green-700'  :
+                          effectiveStatus === 'rejected'    ? 'bg-red-100 text-red-700'      :
+                          effectiveStatus === 'conditional' ? 'bg-amber-100 text-amber-700'  :
+                          'bg-gray-100 text-gray-600'
+                        }`}>
+                          {adrOverride && <Award className="w-2.5 h-2.5" />}{effectiveStatus}
+                        </span>
+                      </div>
                     </div>
+                    <p className="text-sm font-semibold text-gray-800 mb-1">{adr.title || adr.decision}</p>
+                    {adr.rationale && (
+                      <p className="text-xs text-gray-500 line-clamp-2">{adr.rationale}</p>
+                    )}
+                    {adr.waiver_expiry_date && (
+                      <p className="text-xs text-amber-700 mt-1 font-medium">Waiver expires: {adr.waiver_expiry_date}</p>
+                    )}
+                    {adr.proposed_target_date && (
+                      <p className="text-xs text-gray-400 mt-1">Target: {adr.proposed_target_date}</p>
+                    )}
+                    {isEA && submissionId && (
+                      <div className="mt-2 pt-2 border-t border-gray-100">
+                        <EAOverrideWidget
+                          label="Override ADR Status"
+                          overrideType="adr_content"
+                          targetId={adrKey}
+                          currentValue={adr.status}
+                          reviewId={submissionId}
+                          options={ADR_STATUS_OPTIONS}
+                          existingOverride={adrOverride}
+                          onSaved={handleOverrideSaved}
+                        />
+                      </div>
+                    )}
                   </div>
-                  <p className="text-sm font-semibold text-gray-800 mb-1">{adr.title || adr.decision}</p>
-                  {adr.rationale && (
-                    <p className="text-xs text-gray-500 line-clamp-2">{adr.rationale}</p>
-                  )}
-                  {adr.waiver_expiry_date && (
-                    <p className="text-xs text-amber-700 mt-1 font-medium">Waiver expires: {adr.waiver_expiry_date}</p>
-                  )}
-                  {adr.proposed_target_date && (
-                    <p className="text-xs text-gray-400 mt-1">Target: {adr.proposed_target_date}</p>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           </section>
         )}
@@ -896,47 +1167,79 @@ export default function ReviewDashboard() {
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Action</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Owner</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Due</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Priority</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {displayActions.map((ac: any, idx: number) => (
-                    <tr key={ac.id || idx} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-800 max-w-sm">
-                        <div className="flex items-start gap-2">
-                          <div>
-                            {(ac.action_type || ac.is_conditional_approval_gate) && (
-                              <div className="flex gap-1 mb-0.5">
-                                {ac.action_type && (
-                                  <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">{ac.action_type}</span>
-                                )}
-                                {ac.is_conditional_approval_gate && (
-                                  <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">Gate</span>
-                                )}
-                              </div>
-                            )}
-                            <p className="line-clamp-2">{ac.title || ac.action_text || ac.action}</p>
+                  {displayActions.map((ac: any, idx: number) => {
+                    const actionKey = ac.id || ac.action_id || `ACT-${seq(idx)}`
+                    const actionOverride = eaOverrides[actionKey]
+                    const effectivePriority = actionOverride ? String(actionOverride.override_value) : ac.priority
+                    return (
+                      <tr key={ac.id || idx} className="border-b last:border-0 hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-800 max-w-sm">
+                          <div className="flex items-start gap-2">
+                            <div>
+                              {(ac.action_type || ac.is_conditional_approval_gate) && (
+                                <div className="flex gap-1 mb-0.5">
+                                  {ac.action_type && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">{ac.action_type}</span>
+                                  )}
+                                  {ac.is_conditional_approval_gate && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">Gate</span>
+                                  )}
+                                </div>
+                              )}
+                              <p className="line-clamp-2">{ac.title || ac.action_text || ac.action}</p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                        {(ac.confirmed_owner || ac.proposed_owner || ac.owner_role)?.replace(/_/g, ' ')}
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                        {ac.confirmed_due_date || ac.proposed_due_date || ac.due_date || (ac.due_days ? `${ac.due_days}d` : '—')}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                          ac.status === 'completed'   ? 'bg-green-100 text-green-700'  :
-                          ac.status === 'in_progress' ? 'bg-blue-100 text-blue-700'    :
-                          ac.status === 'closed'      ? 'bg-gray-200 text-gray-600'    :
-                          'bg-amber-100 text-amber-700'
-                        }`}>
-                          {ac.status?.replace(/_/g, ' ')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                          {(ac.confirmed_owner || ac.proposed_owner || ac.owner_role)?.replace(/_/g, ' ')}
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                          {ac.confirmed_due_date || ac.proposed_due_date || ac.due_date || (ac.due_days ? `${ac.due_days}d` : '—')}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="space-y-1">
+                            {effectivePriority && (
+                              <span className={`text-xs px-2 py-0.5 rounded font-medium flex items-center gap-0.5 w-fit ${
+                                effectivePriority === 'CRITICAL' ? 'bg-red-200 text-red-800' :
+                                effectivePriority === 'HIGH'     ? 'bg-red-100 text-red-700' :
+                                effectivePriority === 'MEDIUM'   ? 'bg-amber-100 text-amber-700' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>
+                                {actionOverride && <Award className="w-2.5 h-2.5" />}{effectivePriority}
+                              </span>
+                            )}
+                            {isEA && submissionId && (
+                              <EAOverrideWidget
+                                label="Override Priority"
+                                overrideType="action_modification"
+                                targetId={actionKey}
+                                currentValue={ac.priority}
+                                reviewId={submissionId}
+                                options={PRIORITY_OPTIONS}
+                                existingOverride={actionOverride}
+                                onSaved={handleOverrideSaved}
+                              />
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                            ac.status === 'completed'   ? 'bg-green-100 text-green-700'  :
+                            ac.status === 'in_progress' ? 'bg-blue-100 text-blue-700'    :
+                            ac.status === 'closed'      ? 'bg-gray-200 text-gray-600'    :
+                            'bg-amber-100 text-amber-700'
+                          }`}>
+                            {ac.status?.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1075,6 +1378,18 @@ export default function ReviewDashboard() {
                   <p className="text-sm text-gray-700">{review.ea_review.ea_annotations}</p>
                 </div>
               )}
+              {(review.ea_review.return_domains || []).length > 0 && (
+                <div className="bg-amber-50 rounded-lg p-3 border border-amber-200 mb-3">
+                  <p className="text-xs font-semibold text-amber-700 uppercase mb-2">Domains Flagged for Rework</p>
+                  <div className="flex flex-wrap gap-2">
+                    {review.ea_review.return_domains.map((slug: string) => (
+                      <span key={slug} className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold border border-amber-300 capitalize">
+                        {slug.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {(review.ea_review.rework_gaps || []).length > 0 && (
                 <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                   <p className="text-xs font-semibold text-amber-700 uppercase mb-2">Rework Required</p>
@@ -1168,12 +1483,70 @@ export default function ReviewDashboard() {
                 </div>
               )}
 
-              {/* RETURN — rework gaps list */}
+              {/* RETURN — domain selector + rework gaps */}
               {eaMode === 'RETURN' && (
                 <div className="border border-amber-200 rounded-xl p-4 bg-amber-50 space-y-4 mb-4">
+
+                  {/* Step 1 — domain selector */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Rework Gaps <span className="text-gray-400 font-normal">(at least one required)</span>
+                      Domains Requiring Rework <span className="text-red-500">*</span>
+                      <span className="text-gray-400 font-normal ml-1">(select all that apply)</span>
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {Object.entries(review?.domain_summaries || {}).map(([slug, summary]: [string, any]) => {
+                        const isSelected = returnDomains.includes(slug)
+                        const ragLabel   = (summary?.rag_label || 'UNKNOWN').toUpperCase()
+                        const ragColor   = ragLabel === 'GREEN' || ragLabel === 'GREEN+'
+                          ? 'bg-green-100 text-green-700'
+                          : ragLabel === 'AMBER'
+                          ? 'bg-amber-200 text-amber-800'
+                          : 'bg-red-100 text-red-700'
+                        return (
+                          <button
+                            key={slug}
+                            type="button"
+                            onClick={() => setReturnDomains(
+                              isSelected
+                                ? returnDomains.filter(d => d !== slug)
+                                : [...returnDomains, slug]
+                            )}
+                            className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-left transition-all ${
+                              isSelected
+                                ? 'border-amber-500 bg-white shadow-sm'
+                                : 'border-gray-200 bg-white hover:border-amber-300'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border-2 ${
+                              isSelected ? 'bg-amber-500 border-amber-500' : 'border-gray-300'
+                            }`}>
+                              {isSelected && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-gray-800 capitalize leading-tight">
+                                {slug.replace(/_/g, ' ')}
+                              </p>
+                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${ragColor}`}>
+                                {ragLabel}
+                              </span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {returnDomains.length > 0 && (
+                      <p className="text-xs text-amber-700 mt-2">
+                        {returnDomains.length} domain{returnDomains.length > 1 ? 's' : ''} selected:{' '}
+                        {returnDomains.map(d => d.replace(/_/g, ' ')).join(', ')}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Step 2 — rework gaps */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Rework Gaps <span className="text-red-500">*</span>
+                      <span className="text-gray-400 font-normal ml-1">(at least one required)</span>
                     </label>
                     <div className="space-y-2 mb-3">
                       {reworkGaps.map((gap, i) => (
@@ -1208,6 +1581,8 @@ export default function ReviewDashboard() {
                       </Button>
                     </div>
                   </div>
+
+                  {/* Step 3 — optional annotations */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       EA Annotations <span className="text-gray-400 font-normal">(optional)</span>
@@ -1269,11 +1644,15 @@ export default function ReviewDashboard() {
       </main>
 
       {/* ── Domain Detail Panel ── */}
-      {activeSlug && domainSummaries[activeSlug] && (
+      {activeSlug && domainSummaries[activeSlug] && submissionId && (
         <DomainDetailPanel
           slug={activeSlug}
           summary={domainSummaries[activeSlug]}
           onClose={() => setActiveSlug(null)}
+          reviewId={submissionId}
+          isEA={isEA}
+          eaOverrides={eaOverrides}
+          onOverrideSaved={handleOverrideSaved}
         />
       )}
     </div>

@@ -189,11 +189,38 @@ class EnhancedDomainValidationAgent:
             payload = {
                 "domain": domain_slug,
                 "session_id": review_id,
-                "summary": {"rag_score": 3, "rag_label": "AMBER",
-                            "rationale": "Parse error — manual review required",
-                            "total_findings": 0, "blocker_count": 0, "mandatory_gaps": 0},
-                "blockers": [], "recommendations": [],
-                "findings": [], "actions": [], "adrs": [],
+                "summary": {
+                    "rag_score": 2,
+                    "rag_label": "RED",
+                    "overall_readiness": "DEFER",
+                    "rationale": "LLM response parse failure — domain result unavailable; manual review required",
+                    "evidence_quality": "ABSENT",
+                    "total_findings": 1, "blocker_count": 0, "mandatory_gaps": 0,
+                },
+                "blockers": [],
+                "recommendations": [],
+                "findings": [{
+                    "id": f"{domain_slug.upper()[:3]}-F01",
+                    "check_category": "PARSE_FAILURE",
+                    "rag_score": 2,
+                    "rag_label": "RED",
+                    "title": f"LLM response parse failure for {domain_slug} domain — re-trigger review",
+                    "finding": "The LLM returned a response that could not be parsed as valid JSON. "
+                               "This domain has not been assessed. Re-trigger the review to obtain a valid result.",
+                    "description": str(exc),
+                    "is_blocker": False,
+                    "waiver_eligible": False,
+                }],
+                "actions": [{
+                    "id": f"{domain_slug.upper()[:3]}-ACT-01",
+                    "domain": domain_slug.upper()[:3],
+                    "action_type": "EVIDENCE_SUBMISSION",
+                    "title": f"Re-trigger ARB review for {domain_slug} domain",
+                    "action": "The domain agent returned an unparseable response. Re-submit the review to obtain a valid assessment.",
+                    "proposed_owner": "solution_architect",
+                    "priority": "HIGH",
+                }],
+                "adrs": [],
             }
 
         payload["tokens_used"]          = response.get("tokens_used", 0)
@@ -270,6 +297,13 @@ class EnhancedDomainValidationAgent:
 Your role is to conduct a thorough, proportionate review of the Solution Architect's submission against
 enterprise architecture standards — producing a balanced assessment that reflects real-world ARB practice.
 
+ARB SCOPE — DESIGN, ARCHITECTURE, AND PLANNING ONLY:
+This review covers the quality and completeness of the architectural design, not operational readiness.
+The ARB's purpose is to verify the solution has sufficient architectural inputs for a development team
+to build, deploy, and test it — not to confirm that building, deployment, or testing has occurred.
+Score based on whether the DESIGN is sound and complete enough to proceed. Do NOT penalise the absence
+of test results, runbooks, operational metrics, or deployed-state evidence — those belong post-ARB.
+
 RULES:
 1. Respond ONLY with a valid JSON object matching DomainReviewPayload schema.
    No preamble, no markdown, no explanation outside the JSON.
@@ -280,27 +314,39 @@ RULES:
    credit it and note the finding as GREEN or AMBER rather than inventing a gap.
 
 3. RAG scoring — calibrate proportionately:
-   • rag_score 1 (BLOCKER): Critical gaps preventing approval — unmitigated security risks,
-     absent mandatory compliance evidence, critical domain with no design at all.
-   • rag_score 2 (RED): Significant gaps requiring mandatory remediation before go-live.
-   • rag_score 3 (AMBER): Gaps present but a clear remediation path exists; trackable post-approval.
-   • rag_score 4 (GREEN+): Area well-addressed; only minor follow-up actions logged.
-   • rag_score 5 (GREEN): Fully addressed — key evidence present, approach aligns with EA standards.
-   Reserve rag_score 1–2 for genuinely critical issues. Prefer AMBER (3) for non-critical gaps.
-   Use rag_score 4 liberally when the SA has done solid work with minor loose ends.
+   • rag_score 1 (BLOCKER): Critical architecture gap preventing approval — unmitigated security design
+     risk, absent mandatory compliance approach, critical domain with no architectural design at all.
+     → Add to blockers[]. blockers[] ONLY contains rag_score 1 findings. NEVER add rag_score 2 or higher to blockers[].
+   • rag_score 2 (RED): Significant design gap — mandatory architectural artefact absent or approach
+     conflicts with EA standards. Design must be revised before development can proceed.
+     → Add to findings[] with a HIGH priority action. NEVER add to blockers[].
+   • rag_score 3 (AMBER): Design gaps present but a clear remediation path exists; trackable post-approval.
+     → Add to findings[] with a MEDIUM priority action.
+   • rag_score 4 (GREEN+): Design well-addressed; only minor follow-up actions logged.
+   • rag_score 5 (GREEN): Comprehensive design — all mandatory architecture artefacts present; sufficient
+     detail for a development team to build, deploy, and test the solution without further architectural
+     clarification.
+   Reserve rag_score 1 ONLY for genuinely unmitigable security/architecture blockers. Prefer RED (2) for
+   significant gaps, AMBER (3) for non-critical gaps. Use rag_score 4 liberally when the SA has done
+   solid design work with minor loose ends.
 
 4. Every finding with rag_score <= 3 (AMBER or RED) MUST have at least one Action in actions[].
 
-5. Generate ADRs for decisions and exceptions that warrant formal recording (aim for 1–3 per domain):
-   MANDATORY — you MUST generate an ADR for each of these:
-   - Any finding with rag_score 1 (BLOCKER) → type: WAIVER (formal exception required before approval)
-   - Any finding with rag_score 2 (RED) → type: WAIVER (significant gap needing formal exception)
-   - Technology or vendor choices that deviate from EA standards → type: DECISION
-   - Architectural patterns that differ materially from the standard approach → type: DECISION
-   OPTIONAL (generate only if clearly applicable):
-   - Notable AMBER decisions that set a precedent or need tracking → type: DECISION
-   Do NOT generate ADRs for routine GREEN findings or straightforward remediation items.
-   adrs[] MUST NOT be empty if any finding has rag_score <= 2.
+5. Generate ADRs only for genuine architectural decisions — apply the ARCHITECTURAL-CHOICE TEST:
+   Ask: "Is there a deliberate design decision between two or more viable architectural options?"
+   YES → generate an ADR.  NO (just a missing plan or incomplete documentation) → action only.
+
+   MANDATORY ADR cases:
+   - A conscious choice to use a technology or pattern that deviates from EA standards → DECISION
+   - A deliberate architectural trade-off (e.g. choosing eventual consistency over strong consistency) → DECISION
+   - Any rag_score 1 blocker that represents a genuine design exception (not just a missing artefact) → WAIVER
+
+   NOT an ADR (action only — do not generate an ADR for these):
+   - Missing VAPT plan, DR test plan, runbook, or other planning artefact → action to produce the plan
+   - Incomplete or vague documentation → action to complete it
+   - Absent evidence of a standard approach (where no deviation was chosen) → action to provide evidence
+
+   adrs[] may be empty. Only generate ADRs when the architectural-choice test passes.
 
 6. ADRs of type WAIVER must include a proposed waiver_expiry_date (ISO date string).
 
@@ -309,20 +355,64 @@ RULES:
    - Mix of GREEN and AMBER, no blockers → summary AMBER (3)
    - Any rag_score=2 finding OR multiple AMBERs without mitigations → summary RED (2)
    - Any blocker (rag_score=1) → summary RED (1)
-   The summary should represent what an ARB panel would conclude about this domain's readiness.
+   The summary should represent what an ARB panel would conclude about this domain's design readiness.
 
-8. When evidence is absent, apply proportionate judgment:
-   - Critical domain (security controls, DR/HA, compliance): absent evidence → rag_score 1–2
-   - Non-critical / advisory: absent evidence → rag_score 3 with a documented action
-   - Evidence quality matters: a vague "will be addressed post-launch" does NOT satisfy a mandatory check.
-     Require a documented plan, owner, and timeline to credit rag_score 3; anything weaker is rag_score 2.
-   - Evidence that addresses the INTENT of a requirement in alternate format: credit appropriately.
+8. When a design artefact is absent, apply proportionate judgment within ARB scope:
+
+   IN SCOPE — ARCHITECTURE DESIGN artefacts (rag_score 1–2 eligible; security domain may blocker):
+   • Threat model / security risk assessment design
+   • RBAC and access control design
+   • Encryption-at-rest and in-transit design  (NOT operational key-management evidence)
+   • Network security architecture and zone design
+   • HA/failover design — mechanism, RTO/RPO targets defined in architecture  (NOT failover test results)
+   • Observability design — what will be monitored, alerting approach  (NOT live metrics or dashboards)
+   • Capacity model / sizing approach  (NOT measured throughput, benchmark, or load-test results)
+   • CI/CD pipeline design with security tooling integration approach  (NOT SAST/DAST scan results)
+
+   ADVISORY SCOPE — testing and operational planning artefacts (cap at rag_score 3, NEVER a Blocker):
+   • VAPT plan — scope, methodology, and timeline  (NOT VAPT results or pen-test reports)
+     Absent VAPT plan → rag_score 3 (AMBER) + action to produce before go-live. NEVER rag_score 1–2.
+   • DR test plan — recovery testing methodology and schedule  (NOT DR test results)
+     Absent DR test plan → rag_score 3 (AMBER) + action to produce before go-live. NEVER rag_score 1–2.
+
+   OUT OF SCOPE — do NOT raise any finding for absence of:
+   • Test results of any kind — unit, integration, load, performance, VAPT, DR
+   • Runbook completeness or operational procedures
+   • Live monitoring metrics, alerting proof, or deployed-state evidence
+   • SAST/DAST scan results, penetration test reports, or security-tool output
+   • Proof-of-concept results or benchmark measurements
+
+   CRITICAL — RAID log "not completed" entries:
+   If the RAID log, risk register, or any artefact states "VAPT not completed before ARB",
+   "DR drill not completed", "penetration test pending", or any similar statement that a
+   test or activity has not yet been executed: this is test EXECUTION — completely OUT OF SCOPE.
+   Do NOT create any finding or blocker for this. Ignore it entirely.
+   The only valid VAPT/DR check: does a VAPT PLAN or DR TEST PLAN document exist? If absent,
+   score AMBER (3) with an action — never a blocker.
+
+   Scoring when design artefacts are absent:
+   - Security architecture absent (no threat model, no RBAC, no encryption design) → rag_score 1–2
+   - HA/DR architecture absent (no failover design, no RTO/RPO targets in the design) → rag_score 1–2
+   - VAPT plan absent → rag_score 3 (AMBER) + action. NEVER rag_score 1–2. NEVER a Blocker.
+   - DR test plan absent → rag_score 3 (AMBER) + action. NEVER rag_score 1–2. NEVER a Blocker.
+   - VAPT results absent → not a finding.  DR test results absent → not a finding.
+   - Non-critical artefact absent, SA has a documented plan with owner and timeline → rag_score 3
+   - Vague "will be addressed post-launch" does not satisfy a mandatory check → rag_score 2
 
 9. Do not invent evidence. Flag genuine absences explicitly — note WHAT is missing and WHY it matters.
    When the SA has documented their rationale for a deviation, assess whether the rationale is adequate
    rather than automatically flagging as non-compliant.
 
-10. Security domain: any rag_score ≤ 2 finding requires a corresponding Blocker entry.
+10. Security domain Blockers — ARCHITECTURE DESIGN gaps only:
+    A finding becomes a Blocker (is_security_or_dr: true) ONLY when it represents an absent or
+    fundamentally inadequate security ARCHITECTURE design element:
+    • No threat model or security risk assessment design
+    • No RBAC / access control design
+    • No encryption-at-rest or in-transit design
+    • No network security architecture or zone design
+    Any other security finding — including a missing VAPT plan, DR test plan, or any testing/
+    operational planning artefact — must NOT be a Blocker. Score these rag_score 3 (AMBER) with
+    an action only. Never set is_security_or_dr: true for a missing planning artefact.
 
 PRAGMATISM GUIDELINES:
 - Calibrate against the solution's risk profile. A customer-facing, regulated system warrants stricter
@@ -342,21 +432,50 @@ COVERAGE REQUIREMENT:
   a GREEN finding (rag_score 4–5) that briefly acknowledges compliance IS the correct output.
   Do not manufacture concerns for well-covered areas. Do not skip any category.
 
+ADR GENERATION REQUIREMENT:
+- You MUST generate ADRs when you identify any of the following:
+  • Technology choices between viable options (e.g., choosing between different databases, frameworks, or cloud services)
+  • Deviations from enterprise standards or patterns that require formal documentation
+  • Architectural trade-offs where the SA has chosen one approach over others
+  • Design decisions that have significant consequences and need formal ratification
+  • Security or compliance exceptions that require waiver documentation
+- Do NOT generate ADRs for missing documentation or plans - those should be actions, not ADRs.
+- Each ADR must include specific options considered with clear pros/cons.
+
+RECOMMENDATION GENERATION REQUIREMENT:
+- You MUST generate recommendations for strategic improvements, even when findings are GREEN:
+  • Suggest architectural patterns or best practices that would strengthen the solution
+  • Recommend additional capabilities that could provide business value
+  • Suggest optimizations for performance, security, or maintainability
+  • Provide guidance on future-proofing or scalability considerations
+- Recommendations should be distinct from actions - they are strategic guidance, not mandatory fixes.
+- Generate at least 1-3 recommendations per domain, even for well-designed solutions.
+
 SCORING RULES:
-5 = Fully compliant — key evidence present, approach clearly aligned with EA standards, no material gaps
-4 = Compliant — area well-addressed; only minor tracked actions remain (e.g., doc update, monitoring config)
-3 = Partially compliant — material gaps present but SA has a credible, time-bound remediation plan
-2 = Significant gaps — mandatory remediation required; go-live should be conditional on resolution
-1 = Fails mandatory standard OR critical evidence absent with no documented mitigation (BLOCKER)""" + ("""
+5 = Comprehensive design — all mandatory architecture artefacts present; sufficient detail for a
+    development team to build, deploy, and test the solution without further architectural clarification
+4 = Compliant — design well-addressed; only minor tracked actions remain (e.g., doc update, detail clarification)
+3 = Partially compliant — design gaps present but SA has a credible, time-bound remediation plan
+2 = Significant design gap — mandatory architectural artefact absent or conflicts with EA standards
+1 = Critical architecture gap — unmitigated design risk or mandatory standard violated with no mitigation (BLOCKER)""" + ("""
 
 SOLUTION DOMAIN — SPECIALIST GUIDANCE:
 As the Solution reviewer your primary responsibility is to assess whether this submission is
 problem-driven, well-defined, and strategically aligned — not just technically complete.
 
+SCOPE BOUNDARY FOR SOLUTION DOMAIN:
+This domain covers STRATEGIC ALIGNMENT only — problem quality, solution fit, business outcomes,
+stakeholder alignment, and strategic context. Do NOT generate security or DR/HA blockers from
+this domain. Any is_security_or_dr field in your blockers[] must always be false. If you find
+security or DR risks in RAID logs or artefacts, note them in recommendations[], not blockers[].
+
 KEY ASSESSMENT AREAS (generate a finding for each, even if all artefacts are absent):
-- PROBLEM_STATEMENT_QUALITY: Is the problem clearly articulated, customer-grounded, and measurable?
-  A vague or generic problem statement → rag_score 2.  Absent problem statement → rag_score 1.
-  A clear, specific, measurable problem linked to a customer or business pain → rag_score 4–5.
+- PROBLEM_STATEMENT_QUALITY: Search BOTH the form-provided fields AND all submitted artefacts
+  for problem statement content before scoring — it may exist in uploaded documents even if the
+  form field is empty.
+  • Absent from BOTH form AND all submitted artefacts → rag_score 2 (RED, significant gap; NOT a blocker)
+  • Present but vague/generic, no measurable impact stated → rag_score 2–3
+  • Clear, specific, measurable, customer-grounded → rag_score 4–5
 - SOLUTION_FIT: Does the proposed solution directly address the root cause of the stated problem?
   Assess alignment between the problem description and the architectural approach in the artefacts.
 - BUSINESS_OUTCOMES: Are target outcomes Specific, Measurable, Achievable, Relevant, Time-bound?
@@ -402,10 +521,10 @@ OUTPUT ADDITION — include a "project_context" object at the top level of your 
         solution_name  = meta.get("solution_name", "(not provided)")
 
         # --- Project info block (always brief; expanded for solution domain) ---
-        problem_statement       = meta.get("problem_statement", "(not provided)")
-        business_drivers        = meta.get("business_drivers", [])
-        stakeholders            = meta.get("stakeholders", [])
-        target_business_outcomes = meta.get("target_business_outcomes", "(not provided)")
+        problem_statement       = meta.get("problem_statement") or "(not provided)"
+        business_drivers        = meta.get("business_drivers") or []
+        stakeholders            = meta.get("stakeholders") or []
+        target_business_outcomes = meta.get("target_business_outcomes") or "(not provided)"
 
         # --- KB section ---
         kb_lines: List[str] = []
@@ -510,18 +629,39 @@ adr_id_start:            ADR-{domain_code}-01
 Use these as starting IDs, incrementing sequentially (F01, F02, F03 ...).
 
 == MANDATORY CHECK CATEGORIES FOR THIS DOMAIN ==
-Assess each category below and produce a finding that accurately reflects the actual state:
-  - Fully compliant area → GREEN finding (rag_score 4–5) briefly acknowledging coverage is the correct output.
-  - Partial compliance or minor gap → AMBER finding (rag_score 3) with a time-bound action.
-  - Critical gap or non-compliant mandatory check → RED finding (rag_score 1–2) with a blocker or action.
+Assess each category below against ARCHITECTURAL COMPLETENESS — design quality and planning adequacy.
+Do NOT penalise absence of test results, runbooks, operational metrics, or deployed-state evidence;
+these are outside ARB scope. Penalise absence of the design, plan, or architectural approach itself.
+  - Fully compliant design → GREEN finding (rag_score 4–5) briefly acknowledging coverage is the correct output.
+  - Partial design or minor gap → AMBER finding (rag_score 3) in findings[] with a time-bound action.
+  - Significant design gap → RED finding (rag_score 2) in findings[] with a HIGH priority action. NEVER in blockers[].
+  - Unmitigable architecture blocker → rag_score 1 in blockers[] AND findings[]. Only use when approval is truly impossible without resolution.
 Do not manufacture concerns for well-addressed areas. Do not skip any listed category.
 Categories marked [MANDATORY-GREEN] require rag_score = 1 if the SA answer is non_compliant
-(check artifact evidence first — adequate mitigating evidence can raise this to rag_score 2).
+(check artifact evidence first — adequate mitigating design evidence can raise this to rag_score 2).
 
 {categories_block}
 
+== ADR AND RECOMMENDATION GENERATION INSTRUCTIONS ==
+IMPORTANT: You must generate both ADRs and recommendations for every domain review:
+
+ADR GENERATION:
+- Look for technology choices, design trade-offs, or deviations from standards in the SA's submission
+- If the SA chose AWS over Azure, Spring Boot over .NET, or made other architectural decisions - create an ADR
+- If the SA deviated from enterprise patterns with documented rationale - create a waiver ADR
+- Each ADR must show at least 2 options considered with pros/cons
+
+RECOMMENDATION GENERATION:
+- Even for GREEN findings, suggest strategic improvements
+- Recommend architectural patterns, best practices, or additional capabilities
+- Provide guidance on performance, security, scalability, or future-proofing
+- Generate 1-3 recommendations per domain minimum
+
 == OUTPUT SCHEMA ==
 Return a JSON object with this exact top-level structure. No markdown. No prose outside the JSON.
+NOTE on is_security_or_dr: Set to true ONLY when a blocker represents a security ARCHITECTURE gap
+or an HA/DR DESIGN gap. Platform/infrastructure operational blockers (missing runbook, capacity config,
+operational procedures) must have is_security_or_dr: false.
 {project_context_schema_hint}
 {{
   "domain": "{domain_code}",

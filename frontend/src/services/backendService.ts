@@ -199,12 +199,9 @@ export const backendService = {
     }
   },
 
-  async markReadyForReview(reviewId: string): Promise<ReviewResult> {
-    if (backendType === 'supabase') {
-      // Supabase service doesn't have markReadyForReview, return placeholder
-      return { success: true, reviewId, report: {}, decision: 'pending' }
-    } else {
-      return await reviewService.markReadyForReview(reviewId)
+  async markReadyForReview(reviewId: string): Promise<void> {
+    if (backendType !== 'supabase') {
+      await reviewService.markReadyForReview(reviewId)
     }
   },
 

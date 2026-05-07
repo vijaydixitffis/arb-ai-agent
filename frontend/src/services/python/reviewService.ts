@@ -86,22 +86,13 @@ export const reviewService = {
   /**
    * Mark review as ready for review and trigger backend
    */
-  async markReadyForReview(reviewId: string): Promise<ReviewResult> {
+  async markReadyForReview(reviewId: string): Promise<void> {
     console.log('[FRONTEND] Marking review as ready for review:', reviewId)
-    
-    // Update status to submitted
-    console.log('[FRONTEND] Updating review status to submitted')
     await apiRequest(`/reviews/${reviewId}`, {
       method: 'PUT',
       body: JSON.stringify({ status: 'submitted' })
     })
-    console.log('[FRONTEND] Review status updated successfully')
-
-    // Trigger review orchestrator
-    console.log('[FRONTEND] About to trigger review orchestrator')
-    const result = await this.triggerReviewOrchestrator(reviewId)
-    
-    return result
+    console.log('[FRONTEND] Review status updated to submitted')
   },
 
   /**

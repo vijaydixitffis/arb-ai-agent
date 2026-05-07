@@ -175,7 +175,7 @@ def _persist_results(db: Session, review_id: str, result: Dict[str, Any]) -> Non
     review.aggregate_rag_score  = result.get("aggregate_score")
     raw_label = result.get("aggregate_rag_label") or ""
     review.aggregate_rag_label  = raw_label.lower() or None
-    review.decision_rationale   = _str(result.get("ai_review", {}).get("decision_rationale"))
+    review.decision_rationale   = _str(result.get("ai_review", {}).get("executive_rationale"))
     review.kb_sources_cited     = _arr(result.get("kb_sources_cited"))
     review.agent_run_at         = datetime.now(timezone.utc)
     review.tokens_used          = result.get("total_tokens_used", 0)
@@ -194,9 +194,10 @@ def _persist_results(db: Session, review_id: str, result: Dict[str, Any]) -> Non
     ]
 
     existing = review.report_json or {}
+    # Save the full result including domain_payloads, not just ai_review
     review.report_json = {
         **existing,
-        "ai_review": result.get("ai_review", {}),
+        **result,  # This includes ai_review, domain_payloads, and all other fields
     }
 
     try:

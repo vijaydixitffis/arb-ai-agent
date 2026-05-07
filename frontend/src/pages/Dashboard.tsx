@@ -49,14 +49,15 @@ export default function Dashboard() {
     if (!confirm('Start the AI review for this submission? The analysis runs in the background — check back in a couple of minutes.')) return
     try {
       setStartingReviewId(reviewId)
-      // Validate and update status to queued (fast DB call)
+      // Update status (fast DB call)
       await reviewService.markReadyForReview(reviewId)
-      // Fire the orchestrator without awaiting — LLM processing takes ~30s
+      // Fire the orchestrator without awaiting — LLM processing takes ~60s
       reviewService.triggerReviewOrchestrator(reviewId).catch((err: unknown) => {
         console.error('Orchestrator error (background):', err)
       })
       showNotification('success', 'Review started! The AI is analysing your submission. Check back in a couple of minutes for the results.')
-      fetchData()
+      // Await fetchData so submissions state is updated before finally clears startingReviewId
+      await fetchData()
     } catch (error) {
       console.error('Error starting review:', error)
       showNotification('error', `Failed to start review: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -256,7 +257,7 @@ export default function Dashboard() {
                         <td className="py-3 px-4 text-sm text-gray-600">{submission.created_date}</td>
                         <td className="py-3 px-4">
                           <div className="flex gap-2">
-                            {['drafting', 'queued', 'returned', 'draft', 'submitted'].includes(submission.status) ? (
+                            {['drafting', 'queued', 'returned', 'draft'].includes(submission.status) ? (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -277,7 +278,13 @@ export default function Dashboard() {
                                 ) : 'Start Review'}
                               </Button>
                             ) : null}
-                            {['approved', 'conditionally_approved', 'rejected', 'deferred', 'closed'].includes(submission.status) ? (
+                            {['submitted', 'analysing'].includes(submission.status) ? (
+                              <Button variant="outline" size="sm" disabled>
+                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                Review in Progress
+                              </Button>
+                            ) : null}
+                            {['review_ready', 'ea_reviewing', 'approved', 'conditionally_approved', 'rejected', 'deferred', 'closed'].includes(submission.status) ? (
                               <Button
                                 variant="ghost"
                                 size="sm"

@@ -28,6 +28,12 @@ export async function apiRequest(
     
     console.log('[API-REQUEST] Response status:', response.status)
 
+    if (response.status === 401) {
+      localStorage.removeItem('token')
+      window.location.href = '/login'
+      throw new Error('Session expired. Please log in again.')
+    }
+
     if (!response.ok) {
       const errorText = await response.text()
       console.error('[API-REQUEST] Error response:', errorText)

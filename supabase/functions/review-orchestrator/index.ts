@@ -162,6 +162,7 @@ serve(async (req) => {
         aggregate_rag_score:    reviewResult.aggregateScore,
         aggregate_rag_label:    reviewResult.aggregateRagLabel,
         recommended_decision:   reviewResult.decision,
+        decision_rationale:     reviewResult.executiveRationale || null,
         kb_sources_cited:       reviewResult.kbSourcesCited,
         consolidated_blockers:  reviewResult.blockers,
         consolidated_actions:   reviewResult.actions,

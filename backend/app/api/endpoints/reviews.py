@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import StreamingResponse
 from typing import List, Optional, Dict, Any
 import logging
 import asyncio
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.services.review_service import ReviewService
+from app.services.pdf_service import PDFService
 from app.utils.schema_validation import validate_review_data_structure, validate_submission_completeness, get_validation_summary
 from sqlalchemy.orm import Session
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +208,7 @@ async def get_review(review_id: str, current_user: tuple = Depends(get_current_u
 
         domain_summaries[slug] = {
             "score":                int(score),
-            "rag_label":            ds.rag_label if ds and ds.rag_label else _rag_label(int(score)),
+            "rag_label":            _rag_label(int(score)),
             "overall_readiness":    ds.overall_readiness if ds else ai_sum.get("overall_readiness"),
             "executive_summary":    ds.executive_summary if ds else ai_sum.get("executive_summary"),
             "compliant_areas":      ds.compliant_areas if ds else ai_sum.get("compliant_areas", []),
@@ -256,6 +259,7 @@ async def get_review(review_id: str, current_user: tuple = Depends(get_current_u
             "overrides":       ea_record.overrides or [],
             "ea_annotations":  ea_record.ea_annotations,
             "rework_gaps":     ea_record.rework_gaps or [],
+            "return_domains":  ea_record.return_domains or [],
             "final_decision":  ea_record.final_decision,
         }
 
@@ -384,6 +388,13 @@ async def create_review(review_data: dict, current_user: tuple = Depends(get_cur
     elif 'form_data' in review_data:
         form_data = review_data['form_data']
     
+    # If form_data exists, ensure it includes all project fields that might be sent at top level
+    if form_data:
+        project_fields = ['problem_statement', 'stakeholders', 'business_drivers', 'target_business_outcomes', 'ptx_gate', 'architecture_disposition']
+        for field in project_fields:
+            if field not in form_data and field in review_data:
+                form_data[field] = review_data[field]
+    
     if form_data:
         form_validation = validate_submission_completeness(form_data, is_draft=is_draft)
         if not form_validation.is_valid:
@@ -490,6 +501,12 @@ async def update_review(review_id: str, review_data: dict, current_user: tuple =
                 form_data['solution_name'] = review_data['solution_name']
             elif form_data.get('project_name'):
                 form_data['solution_name'] = form_data['project_name']
+        
+        # Copy project information fields that might be sent at top level
+        project_fields = ['problem_statement', 'stakeholders', 'business_drivers', 'target_business_outcomes', 'ptx_gate', 'architecture_disposition']
+        for field in project_fields:
+            if field not in form_data and field in review_data:
+                form_data[field] = review_data[field]
 
         form_validation = validate_submission_completeness(form_data, artefacts=artefacts_by_domain, is_draft=is_draft)
         if not form_validation.is_valid:
@@ -639,6 +656,8 @@ async def submit_ea_decision(
     if ea_decision == "DEFER" and len(decision_rationale.strip()) < 50:
         raise HTTPException(status_code=400, detail="DEFER requires a rationale of at least 50 characters")
 
+    if ea_decision == "RETURN" and not return_domains:
+        raise HTTPException(status_code=400, detail="RETURN requires at least one domain to be flagged")
     if ea_decision == "RETURN" and not rework_gaps:
         raise HTTPException(status_code=400, detail="RETURN requires at least one rework gap")
 
@@ -659,18 +678,20 @@ async def submit_ea_decision(
         ea_record.overrides     = overrides
         ea_record.ea_annotations= ea_annotations
         ea_record.rework_gaps   = rework_gaps
+        ea_record.return_domains= return_domains if ea_decision == "RETURN" else []
         ea_record.final_decision= ea_decision
         ea_record.updated_at    = now
     else:
         ea_record = EAReviewRecord(
-            review_id     = review_id,
-            ea_name       = ea_name,
-            reviewed_at   = now,
-            ea_decision   = ea_decision,
-            overrides     = overrides,
-            ea_annotations= ea_annotations,
-            rework_gaps   = rework_gaps,
-            final_decision= ea_decision,
+            review_id      = review_id,
+            ea_name        = ea_name,
+            reviewed_at    = now,
+            ea_decision    = ea_decision,
+            overrides      = overrides,
+            ea_annotations = ea_annotations,
+            rework_gaps    = rework_gaps,
+            return_domains = return_domains if ea_decision == "RETURN" else [],
+            final_decision = ea_decision,
         )
         db.add(ea_record)
 
@@ -713,3 +734,189 @@ async def submit_ea_decision(
         raise HTTPException(status_code=500, detail=f"Failed to save EA decision: {exc}")
 
     return {"message": "EA decision recorded", "review_id": review_id, "ea_decision": ea_decision, "status": review.status}
+
+
+# ── EA Override Endpoints (Tier 3) ────────────────────────────────────────────
+
+VALID_OVERRIDE_TYPES = {"finding_severity", "action_modification", "adr_content", "overall_decision"}
+
+
+@router.post("/{review_id}/overrides")
+async def create_ea_override(
+    review_id: str,
+    body: Dict[str, Any],
+    current_user: tuple = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a governed EA override with mandatory rationale and full audit trail."""
+    from app.db.review_models import Review, EAOverride, AuditLog
+    from datetime import datetime, timezone
+    import uuid as uuid_mod
+
+    user_id_token, user_role = current_user
+    if not user_id_token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user_role not in ("enterprise_architect", "arb_admin"):
+        raise HTTPException(status_code=403, detail="Only EA or ARB Admin can create overrides")
+
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    override_type  = body.get("override_type")
+    target_id      = body.get("target_id")
+    original_value = body.get("original_value")
+    override_value = body.get("override_value")
+    rationale      = body.get("rationale", "")
+
+    if override_type not in VALID_OVERRIDE_TYPES:
+        raise HTTPException(status_code=422, detail=f"override_type must be one of {sorted(VALID_OVERRIDE_TYPES)}")
+    if not target_id:
+        raise HTTPException(status_code=422, detail="target_id is required")
+    if original_value is None or override_value is None:
+        raise HTTPException(status_code=422, detail="original_value and override_value are required")
+    if not rationale or len(rationale.strip()) < 10:
+        raise HTTPException(status_code=422, detail="rationale must be at least 10 characters")
+
+    # overall_decision overrides are immutable once the review status advances to ea_approved
+    if override_type == "overall_decision" and review.status == "ea_approved":
+        raise HTTPException(status_code=409, detail="Review is already EA-approved; overall_decision override is locked")
+
+    now = datetime.now(timezone.utc)
+    override = EAOverride(
+        review_id      = uuid_mod.UUID(review_id),
+        ea_user_id     = uuid_mod.UUID(user_id_token),
+        override_type  = override_type,
+        target_id      = target_id,
+        original_value = original_value,
+        override_value = override_value,
+        rationale      = rationale.strip(),
+        is_immutable   = False,
+        created_at     = now,
+        updated_at     = now,
+    )
+    db.add(override)
+
+    # Write audit log
+    audit = AuditLog(
+        review_id      = uuid_mod.UUID(review_id),
+        user_id        = uuid_mod.UUID(user_id_token),
+        user_role      = user_role,
+        action         = "ea_override_created",
+        audit_metadata = {
+            "override_type":  override_type,
+            "target_id":      target_id,
+            "original_value": original_value,
+            "override_value": override_value,
+            "rationale":      rationale.strip(),
+        },
+        created_at     = now,
+    )
+    db.add(audit)
+
+    try:
+        db.commit()
+        db.refresh(override)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to save override: {exc}")
+
+    return {
+        "id":             str(override.id),
+        "review_id":      review_id,
+        "override_type":  override.override_type,
+        "target_id":      override.target_id,
+        "original_value": override.original_value,
+        "override_value": override.override_value,
+        "rationale":      override.rationale,
+        "is_immutable":   override.is_immutable,
+        "created_at":     override.created_at.isoformat(),
+        "ea_user_id":     str(override.ea_user_id),
+    }
+
+
+@router.get("/{review_id}/overrides")
+async def get_ea_overrides(
+    review_id: str,
+    override_type: Optional[str] = None,
+    current_user: tuple = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return EA overrides for a review, optionally filtered by override_type."""
+    from app.db.review_models import Review, EAOverride
+
+    user_id_token, _ = current_user
+    if not user_id_token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    q = db.query(EAOverride).filter(EAOverride.review_id == review_id)
+    if override_type:
+        if override_type not in VALID_OVERRIDE_TYPES:
+            raise HTTPException(status_code=422, detail=f"override_type must be one of {sorted(VALID_OVERRIDE_TYPES)}")
+        q = q.filter(EAOverride.override_type == override_type)
+
+    overrides = q.order_by(EAOverride.created_at.asc()).all()
+
+    grouped: Dict[str, list] = {t: [] for t in VALID_OVERRIDE_TYPES}
+    for o in overrides:
+        grouped[o.override_type].append({
+            "id":             str(o.id),
+            "target_id":      o.target_id,
+            "original_value": o.original_value,
+            "override_value": o.override_value,
+            "rationale":      o.rationale,
+            "is_immutable":   o.is_immutable,
+            "ea_user_id":     str(o.ea_user_id),
+            "created_at":     o.created_at.isoformat() if o.created_at else None,
+            "confirmed_by":   str(o.confirmed_by) if o.confirmed_by else None,
+            "confirmed_at":   o.confirmed_at.isoformat() if o.confirmed_at else None,
+        })
+
+    return {"review_id": review_id, "overrides": grouped}
+
+
+@router.get("/{review_id}/dossier/pdf")
+async def generate_dossier_pdf(
+    review_id: str,
+    current_user: tuple = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate PDF dossier for a review - all authenticated users can generate"""
+    user_id_token, user_role = current_user
+    if not user_id_token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    # Get review data
+    service = ReviewService(db)
+    review = service.get_review(review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # Get full review data with domain summaries
+    review_endpoint_response = await get_review(review_id, current_user, db)
+    
+    try:
+        # Generate PDF
+        pdf_service = PDFService()
+        pdf_bytes = pdf_service.generate_dossier_pdf(review_endpoint_response)
+        
+        # Create streaming response
+        pdf_stream = io.BytesIO(pdf_bytes)
+        
+        # Generate filename
+        solution_name = review_endpoint_response.get('solution_name', 'dossier').replace(' ', '_')
+        filename = f"{solution_name}_ARB_Dossier_{review_id[:8]}.pdf"
+        
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating PDF dossier for review {review_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF dossier: {str(e)}")
