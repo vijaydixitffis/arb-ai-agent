@@ -1,0 +1,108 @@
+
+<style>
+.ov-row{display:grid;grid-template-columns:22px 150px 1fr 1fr;gap:10px 14px;align-items:start;padding:10px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:13px}
+.ov-row:last-child{border-bottom:none}
+.lyr-num{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;flex-shrink:0}
+.can-badge{font-size:10px;font-weight:500;padding:2px 7px;border-radius:999px;white-space:nowrap;margin-bottom:3px;display:inline-block}
+.cant-badge{font-size:10px;font-weight:500;padding:2px 7px;border-radius:999px;white-space:nowrap;margin-bottom:3px;display:inline-block;background:#F1EFE8;color:#444441;border:0.5px solid #B4B2A9}
+.col-hd{font-size:11px;font-weight:500;color:var(--color-text-secondary);letter-spacing:0.04em;padding-bottom:6px;border-bottom:0.5px solid var(--color-border-secondary)}
+</style>
+
+<div style="border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-secondary);overflow:hidden">
+  <div style="background:var(--color-background-secondary);padding:12px 18px;font-size:13px;font-weight:500;color:var(--color-text-primary)">EA override scope</div>
+  <div style="padding:4px 18px 0">
+
+    <!-- column headers -->
+    <div style="display:grid;grid-template-columns:22px 150px 1fr 1fr;gap:10px 14px;padding:8px 0 4px">
+      <span></span>
+      <span class="col-hd">Layer</span>
+      <span class="col-hd">EA can override</span>
+      <span class="col-hd">EA cannot override</span>
+    </div>
+
+    <!-- L1 -->
+    <div class="ov-row">
+      <div class="lyr-num" style="background:#FAEEDA;color:#633806;border:0.5px solid #EF9F27">1</div>
+      <div>
+        <div style="font-weight:500;color:var(--color-text-primary)">Finding category</div>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Most common override</div>
+      </div>
+      <div>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Severity: MEDIUM → HIGH</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">HIGH → BLOCKER</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">BLOCKER → HIGH (with evidence)</span><br>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:4px">Rationale must be documented. Agent recommendation stays visible alongside EA classification.</div>
+      </div>
+      <div>
+        <span class="cant-badge">Remove finding entirely</span><br>
+        <span class="cant-badge">Demote Red Security finding without evidence</span>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:4px">All findings remain in audit log even if overridden.</div>
+      </div>
+    </div>
+
+    <!-- L2 -->
+    <div class="ov-row">
+      <div class="lyr-num" style="background:#FAEEDA;color:#633806;border:0.5px solid #EF9F27">2</div>
+      <div>
+        <div style="font-weight:500;color:var(--color-text-primary)">Actions</div>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Owner / date / scope</div>
+      </div>
+      <div>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Reassign owner</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Extend or tighten due date</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Split one action into two</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Close if evidence already provided</span>
+      </div>
+      <div>
+        <span class="cant-badge">Delete a mandatory blocker action</span><br>
+        <span class="cant-badge">Mark Red-finding action as closed without evidence</span>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:4px">Actions from Red findings remain open until EA validates the evidence.</div>
+      </div>
+    </div>
+
+    <!-- L3 -->
+    <div class="ov-row">
+      <div class="lyr-num" style="background:#FAEEDA;color:#633806;border:0.5px solid #EF9F27">3</div>
+      <div>
+        <div style="font-weight:500;color:var(--color-text-primary)">ADR content</div>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Decision · rationale · status</div>
+      </div>
+      <div>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Change recommended decision</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Add / remove options considered</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Convert to time-bound waiver</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Reject draft ADR (below threshold)</span>
+      </div>
+      <div>
+        <span class="cant-badge">Create unbounded waivers</span><br>
+        <span class="cant-badge">Remove ADR from audit trail</span>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:4px">Waivers must carry an expiry date. No open-ended deviations.</div>
+      </div>
+    </div>
+
+    <!-- L4 -->
+    <div class="ov-row" style="border-bottom:none">
+      <div class="lyr-num" style="background:#FCEBEB;color:#501313;border:0.5px solid #E24B4A">4</div>
+      <div>
+        <div style="font-weight:500;color:var(--color-text-primary)">Overall decision</div>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Highest-weight override</div>
+      </div>
+      <div>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Escalate: Approve → Defer</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Accept lower bar with compensating controls</span><br>
+        <span class="can-badge" style="background:#EAF3DE;color:#27500A;border:0.5px solid #97C459">Add conditions not captured by agent</span>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:4px">Requires most substantial rationale. Agent original recommendation remains visible in dossier for ARB panel.</div>
+      </div>
+      <div>
+        <span class="cant-badge">Approve with unresolved Security Red</span><br>
+        <span class="cant-badge">Approve with unresolved DR Red</span>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:4px">ARB panel may further override EA's position during the meeting — that override is recorded separately.</div>
+      </div>
+    </div>
+
+  </div>
+  <!-- Footer note -->
+  <div style="background:var(--color-background-secondary);padding:10px 18px;font-size:12px;color:var(--color-text-secondary)">
+    All overrides are stored in the immutable audit log with actor, timestamp, and rationale. Agent recommendations are never deleted — they remain alongside the EA annotation for full ARB traceability.
+  </div>
+</div>

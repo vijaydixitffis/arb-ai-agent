@@ -43,4 +43,3 @@ pandas
 openai
 google-genai
 aiofiles
-reportlab>=4.0.0

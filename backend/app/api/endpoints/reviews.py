@@ -6,7 +6,6 @@ import asyncio
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.services.review_service import ReviewService
-from app.services.pdf_service import PDFService
 from app.utils.schema_validation import validate_review_data_structure, validate_submission_completeness, get_validation_summary
 from sqlalchemy.orm import Session
 import io
@@ -879,44 +878,3 @@ async def get_ea_overrides(
     return {"review_id": review_id, "overrides": grouped}
 
 
-@router.get("/{review_id}/dossier/pdf")
-async def generate_dossier_pdf(
-    review_id: str,
-    current_user: tuple = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Generate PDF dossier for a review - all authenticated users can generate"""
-    user_id_token, user_role = current_user
-    if not user_id_token:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    # Get review data
-    service = ReviewService(db)
-    review = service.get_review(review_id)
-    if not review:
-        raise HTTPException(status_code=404, detail="Review not found")
-
-    # Get full review data with domain summaries
-    review_endpoint_response = await get_review(review_id, current_user, db)
-    
-    try:
-        # Generate PDF
-        pdf_service = PDFService()
-        pdf_bytes = pdf_service.generate_dossier_pdf(review_endpoint_response)
-        
-        # Create streaming response
-        pdf_stream = io.BytesIO(pdf_bytes)
-        
-        # Generate filename
-        solution_name = review_endpoint_response.get('solution_name', 'dossier').replace(' ', '_')
-        filename = f"{solution_name}_ARB_Dossier_{review_id[:8]}.pdf"
-        
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-        
-    except Exception as e:
-        logger.error(f"Error generating PDF dossier for review {review_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate PDF dossier: {str(e)}")

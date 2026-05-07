@@ -1,0 +1,110 @@
+
+<style>
+.rag-g{background:#EAF3DE;color:#27500A;border:0.5px solid #97C459}
+.rag-a{background:#FAEEDA;color:#633806;border:0.5px solid #EF9F27}
+.rag-r{background:#FCEBEB;color:#501313;border:0.5px solid #E24B4A}
+.rag-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.score-pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:4px 10px;border-radius:6px;font-weight:500;border:0.5px solid}
+.domain-row{display:grid;grid-template-columns:20px 1fr 80px 1fr;gap:8px 12px;align-items:start;padding:7px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:13px}
+.domain-row:last-child{border-bottom:none}
+.block-pill{display:inline-block;font-size:10px;font-weight:500;padding:2px 7px;border-radius:999px;background:#FCEBEB;color:#501313;border:0.5px solid #E24B4A;margin-left:6px}
+</style>
+
+<div style="border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-secondary);overflow:hidden">
+
+  <!-- Header band -->
+  <div style="background:var(--color-background-secondary);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:3px;letter-spacing:0.04em">PRE-ARB DOSSIER</div>
+      <div style="font-size:17px;font-weight:500;color:var(--color-text-primary)">Customer Payments Platform v3</div>
+      <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">EARR-2026-0412 · EA: Priya Nair · Review: 12-May-2026</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:5px">RECOMMENDED DECISION</div>
+      <span class="score-pill rag-a" style="font-size:13px;padding:6px 14px">⚠ Approve with conditions</span>
+    </div>
+  </div>
+
+  <!-- Aggregate bar -->
+  <div style="padding:14px 18px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <div style="font-size:12px;color:var(--color-text-secondary)">Aggregate readiness</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <span class="score-pill rag-g">3 domains Green</span>
+      <span class="score-pill rag-a">5 domains Amber</span>
+      <span class="score-pill rag-r">1 domain Red — BLOCKER</span>
+    </div>
+  </div>
+
+  <!-- Rationale -->
+  <div style="padding:14px 18px;border-bottom:0.5px solid var(--color-border-tertiary);font-size:13px;color:var(--color-text-secondary);line-height:1.7">
+    <span style="font-weight:500;color:var(--color-text-primary)">Agent rationale: </span>
+    The platform demonstrates strong application and infrastructure foundations with current SBOM and approved IaC patterns. A Security Red score (missing VAPT evidence, incomplete RBAC for three service accounts) constitutes a mandatory blocker; conditional approval is the ceiling until this is resolved. Four Amber domains carry time-bound actions with named owners and are acceptable for conditional progression to full ARB.
+  </div>
+
+  <!-- Domain scorecard -->
+  <div style="padding:14px 18px">
+    <div style="font-size:11px;font-weight:500;color:var(--color-text-secondary);letter-spacing:0.04em;margin-bottom:8px">DOMAIN SCORECARD</div>
+
+    <div class="domain-row">
+      <span class="rag-badge rag-g" style="padding:3px 6px;border-radius:4px;font-size:11px">4/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Application architecture</span>
+      <span class="rag-badge rag-g">Green</span>
+      <span style="color:var(--color-text-secondary)">SBOM current; resilience patterns applied; minor versioning doc gap</span>
+    </div>
+    <div class="domain-row">
+      <span class="rag-badge rag-a" style="padding:3px 6px;border-radius:4px;font-size:11px">3/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Software architecture</span>
+      <span class="rag-badge rag-a">Amber</span>
+      <span style="color:var(--color-text-secondary)">Circuit breakers partial; API backward-compat policy undocumented</span>
+    </div>
+    <div class="domain-row">
+      <span class="rag-badge rag-a" style="padding:3px 6px;border-radius:4px;font-size:11px">3/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Integration architecture</span>
+      <span class="rag-badge rag-a">Amber</span>
+      <span style="color:var(--color-text-secondary)">Catalogue 80% complete; two integrations missing NFR metadata</span>
+    </div>
+    <div class="domain-row">
+      <span class="rag-badge rag-g" style="padding:3px 6px;border-radius:4px;font-size:11px">4/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">API architecture</span>
+      <span class="rag-badge rag-g">Green</span>
+      <span style="color:var(--color-text-secondary)">Conforms to API Standards v3.1; rate-limiting and pagination in place</span>
+    </div>
+    <div class="domain-row">
+      <span class="rag-badge rag-r" style="padding:3px 6px;border-radius:4px;font-size:11px">1/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Security architecture<span class="block-pill">BLOCKER</span></span>
+      <span class="rag-badge rag-r">Red</span>
+      <span style="color:var(--color-text-secondary)">VAPT not submitted; RBAC incomplete for 3 service accounts</span>
+    </div>
+    <div class="domain-row">
+      <span class="rag-badge rag-a" style="padding:3px 6px;border-radius:4px;font-size:11px">3/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Data architecture</span>
+      <span class="rag-badge rag-a">Amber</span>
+      <span style="color:var(--color-text-secondary)">Classification complete; lifecycle policy missing for one domain</span>
+    </div>
+    <div class="domain-row">
+      <span class="rag-badge rag-g" style="padding:3px 6px;border-radius:4px;font-size:11px">4/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Infra & platform</span>
+      <span class="rag-badge rag-g">Green</span>
+      <span style="color:var(--color-text-secondary)">IaC in place; upgrade path approved; capacity model verified</span>
+    </div>
+    <div class="domain-row">
+      <span class="rag-badge rag-a" style="padding:3px 6px;border-radius:4px;font-size:11px">3/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Engineering & DevSecOps</span>
+      <span class="rag-badge rag-a">Amber</span>
+      <span style="color:var(--color-text-secondary)">SAST not in CI/CD pipeline; DAST results pending</span>
+    </div>
+    <div class="domain-row" style="border-bottom:none">
+      <span class="rag-badge rag-a" style="padding:3px 6px;border-radius:4px;font-size:11px">3/5</span>
+      <span style="color:var(--color-text-primary);font-weight:500">Engineering quality</span>
+      <span class="rag-badge rag-a">Amber</span>
+      <span style="color:var(--color-text-secondary)">Code review 70%; perf test results >90 days old — re-run required</span>
+    </div>
+  </div>
+
+  <!-- Blocker callout -->
+  <div style="margin:0 18px 16px;border-radius:var(--border-radius-md);background:#FCEBEB;border:0.5px solid #E24B4A;padding:11px 14px">
+    <div style="font-size:11px;font-weight:500;color:#A32D2D;letter-spacing:0.04em;margin-bottom:5px">BLOCKER — MUST RESOLVE BEFORE ARB</div>
+    <div style="font-size:13px;color:#501313">BLK-01 · Security: VAPT evidence not submitted. RBAC model incomplete for three service accounts. Non-compliance with Security Standards v2.4.</div>
+  </div>
+
+</div>
