@@ -2,8 +2,11 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { toARBRef } from '../utils/reviewRef'
 
-interface jsPDFExtended extends jsPDF {
-  lastAutoTable?: { finalY: number }
+// Extend jsPDF prototype with autotable functionality
+declare module 'jspdf' {
+  interface jsPDF {
+    lastAutoTable?: { finalY: number }
+  }
 }
 
 interface ReviewData {
@@ -120,7 +123,7 @@ function ensureSpace(doc: jsPDF, y: number, needed: number, margin: number): num
 }
 
 export async function generateARBReportPDF(review: ReviewData): Promise<void> {
-  const doc = new jsPDF() as jsPDFExtended
+  const doc = new jsPDF()
   const pageWidth = doc.internal.pageSize.width
   const margin = 18
   const contentWidth = pageWidth - 2 * margin

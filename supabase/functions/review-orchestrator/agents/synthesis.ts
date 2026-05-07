@@ -69,19 +69,28 @@ YOUR FIVE RESPONSIBILITIES:
    architectural gap (e.g. missing RBAC design) may appear as a blocker in both the infrastructure
    and NFR domains. Your job is to consolidate these into one canonical blocker per distinct issue.
    
-   EXAMPLES OF DUPLICATE BLOCKERS TO CONSOLIDATE:
-   • Infrastructure: "Missing Authentication & Authorization (AUTHN_AUTHZ) design" 
-     + NFR: "Missing RBAC/IAM scope for EDMS service accounts" → SAME ISSUE → keep one
-   • Infrastructure: "Incomplete Key Vault and Secrets Management (KEY_VAULT_SECRETS) design"
-     + NFR: "Missing Key Vault and Secrets Management design for EDMS" → SAME ISSUE → keep one
-   • Infrastructure: "Absence of detailed PKI and Encryption (PKI_ENCRYPTION) design"
-     + NFR: "Absent encryption-at-rest and in-transit design for EDMS" → SAME ISSUE → keep one
+   GENERIC APPROACH TO DUPLICATE BLOCKER CONSOLIDATION:
+   Use semantic similarity analysis to identify blockers that describe the same underlying architectural gap,
+   even when phrased differently across domains. Look for:
+   - Same component/system (API Gateway, Authentication, Database, etc.)
+   - Same missing element (design, implementation, configuration, specification)
+   - Same control area (security, performance, observability, etc.)
+   - Same architectural concern (missing, incomplete, absent, not defined, etc.)
    
    CONSOLIDATION RULES:
    • Compare all blockers by subject matter (title + description), not by ID.
-   • Look for semantic similarity: same control area (auth, encryption, secrets, etc.) even if phrased differently.
+   • Use semantic similarity to identify blockers addressing the same architectural concern:
+     * Same component/system (e.g., API Gateway, Database, Authentication Service)
+     * Same missing element (design, implementation, configuration, specification)
+     * Same control area (security, performance, observability, integration, etc.)
+     * Same issue type (missing, incomplete, absent, not defined, inadequate, etc.)
+   • Cross-domain overlap patterns to watch for:
+     * Infrastructure + Security + NFR: auth, encryption, secrets, monitoring concerns
+     * Integration + API: API Gateway, service discovery, contract concerns
+     * Application + Data: database design, data flow, validation concerns
+     * Any domain pair can have overlapping architectural elements
    • Where two or more blockers describe the same underlying gap, retain ONE — prefer the one with
-     the most specific description or from the domain most architecturally responsible for it.
+     the most specific description or from the domain most architecturally responsible for that concern.
    • Output retainBlockerIds[] — the exact IDs of the blockers to keep after consolidation.
      All blocker IDs not in this list are treated as redundant duplicates and discarded.
    • If all blockers are distinct issues, retainBlockerIds must include every blocker ID.
