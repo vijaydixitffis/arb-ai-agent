@@ -131,7 +131,7 @@ export class OrchestratorAgent {
     const agentDomainMap: Record<string, string[]> = {
       solution:       ['solution'],
       business:       ['business'],
-      application:    ['application', 'software'],
+      application:    ['application'],
       integration:    ['integration'],
       data:           ['data'],
       infrastructure: ['infra', 'security'],
@@ -210,8 +210,12 @@ export class OrchestratorAgent {
     })
     totalTokensUsed += synthesisResult.tokensUsed
 
-    // Apply synthesis score corrections to domainScores
+    // Apply synthesis score corrections to domainScores (only for domains that actually ran)
     for (const [domain, score] of Object.entries(synthesisResult.finalDomainScores)) {
+      if (!(domain in domainScores)) {
+        console.warn(`[ORCHESTRATOR] Ignoring score for unknown domain '${domain}' from synthesis`)
+        continue
+      }
       domainScores[domain] = score
     }
 
@@ -231,13 +235,23 @@ export class OrchestratorAgent {
       ? allBlockers.filter(b => retainSet.has(b.id))
       : allBlockers
 
+    // Filter findings through synthesis deduplication (suppress cross-domain duplicates)
+    const dupFindingIds = new Set(synthesisResult.duplicateFindingIds ?? [])
+    const findingsBeforeDedup = allFindings.length
+    const deduplicatedFindings = dupFindingIds.size > 0
+      ? allFindings.filter(f => !dupFindingIds.has(f.finding_id ?? f.id))
+      : allFindings
+    if (dupFindingIds.size > 0) {
+      console.log(`[ORCHESTRATOR] Suppressed ${findingsBeforeDedup - deduplicatedFindings.length} duplicate finding(s): ${[...dupFindingIds].join(', ')}`)
+    }
+
     const aggregateRagLabel = scoreToRagLabel(aggregateScore)
     const decision = this.determineDecision(aggregateScore, consolidatedBlockers)
 
     console.log(`\n=== Aggregate Results (post-synthesis) ===`)
     console.log(`Decision: ${decision}, Agg score: ${aggregateScore} (${aggregateRagLabel}), Blockers: ${consolidatedBlockers.length} (raw: ${allBlockers.length})`)
-    console.log(`Findings: ${allFindings.length}, Actions: ${allActions.length}, ADRs: ${filteredAdrs.length}/${allAdrs.length} (synthesis-gated), Tokens: ${totalTokensUsed}`)
-    console.log(`Score corrections: ${synthesisResult.scoreCorrections.length}, Removed ADRs: ${synthesisResult.removedAdrIds.length}, Dropped duplicate blockers: ${allBlockers.length - consolidatedBlockers.length}`)
+    console.log(`Findings: ${deduplicatedFindings.length} (raw: ${findingsBeforeDedup}), Actions: ${allActions.length}, ADRs: ${filteredAdrs.length}/${allAdrs.length} (synthesis-gated), Tokens: ${totalTokensUsed}`)
+    console.log(`Score corrections: ${synthesisResult.scoreCorrections.length}, Removed ADRs: ${synthesisResult.removedAdrIds.length}, Dropped duplicate blockers: ${allBlockers.length - consolidatedBlockers.length}, Suppressed duplicate findings: ${dupFindingIds.size}`)
 
     const fullReport = {
       ...(reportJson ?? {}),
@@ -248,7 +262,7 @@ export class OrchestratorAgent {
         aggregate_rag_label:   aggregateRagLabel,
         domain_scores:         domainScores,
         domain_summaries:      domainSummaries,
-        findings:              allFindings,
+        findings:              deduplicatedFindings,
         blockers:              consolidatedBlockers,
         recommendations:       allRecommendations,
         actions:               allActions,
@@ -258,6 +272,7 @@ export class OrchestratorAgent {
         executive_rationale:   synthesisResult.executiveRationale,
         score_corrections:     synthesisResult.scoreCorrections,
         removed_adr_ids:       synthesisResult.removedAdrIds,
+        duplicate_finding_ids: synthesisResult.duplicateFindingIds,
         processed_at:          new Date().toISOString(),
       },
       // Add domain_payloads to match Python backend structure
@@ -278,7 +293,7 @@ export class OrchestratorAgent {
       recommended_decision:   decision,
       domain_scores:          domainScores,
       domain_summaries:       domainSummaries,
-      findings:               allFindings,
+      findings:               deduplicatedFindings,
       blockers:               consolidatedBlockers,
       recommendations:        allRecommendations,
       actions:                allActions,
@@ -286,7 +301,7 @@ export class OrchestratorAgent {
       nfr_scorecard:          allNfrScorecard,
       kb_sources_cited:       [...new Set(kbSourcesCited)],
       total_tokens_used:      totalTokensUsed,
-      processing_time_seconds: totalTokensUsed > 0 ? 0 : 0, // Simplified for now
+      processing_time_seconds: totalTokensUsed > 0 ? 0 : 0,
       domains_evaluated:      uniqueDomains,
     }
 
@@ -296,7 +311,7 @@ export class OrchestratorAgent {
       aggregateRagLabel,
       domainScores,
       domainSummaries,
-      findings:           allFindings,
+      findings:           deduplicatedFindings,
       blockers:           consolidatedBlockers,
       adrs:               filteredAdrs,
       actions:            allActions,

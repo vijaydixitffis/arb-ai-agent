@@ -132,9 +132,19 @@ class EnhancedARBOrchestrator:
             for f in payload.get("findings", []):
                 all_findings.append({**f, "domain_slug": slug})
 
-            # Blockers (merged into findings with severity=critical in agent endpoint)
-            for b in payload.get("blockers", []):
-                all_blockers.append({**b, "domain_slug": slug})
+            # Blockers: only trust blockers from domains that actually scored 1 (BLOCKER).
+            # LLMs occasionally emit items in blockers[] while scoring the domain AMBER/RED —
+            # that is contradictory output; discard to prevent false reject decisions.
+            spurious_blockers = payload.get("blockers", [])
+            if rag_score == 1:
+                for b in spurious_blockers:
+                    all_blockers.append({**b, "domain_slug": slug})
+            elif spurious_blockers:
+                logger.warning(
+                    f"[ORCHESTRATOR] Discarding {len(spurious_blockers)} blocker(s) from "
+                    f"domain '{slug}' (domain scored rag_score={rag_score}, not 1 — "
+                    f"inconsistent LLM output; treating as findings only)"
+                )
 
             all_recommendations.extend(payload.get("recommendations", []))
             all_actions.extend(payload.get("actions", []))
@@ -189,6 +199,16 @@ class EnhancedARBOrchestrator:
             retain_set = set(retain_blocker_ids)
             all_blockers = [b for b in all_blockers if (b.get("id") or b.get("blocker_id")) in retain_set]
 
+        # Filter findings through synthesis deduplication (suppress cross-domain duplicates)
+        duplicate_finding_ids = set(synthesis.get("duplicate_finding_ids") or [])
+        if duplicate_finding_ids:
+            before = len(all_findings)
+            all_findings = [f for f in all_findings if f.get("id") not in duplicate_finding_ids]
+            logger.info(
+                f"[ORCHESTRATOR] Suppressed {before - len(all_findings)} duplicate finding(s) "
+                f"via synthesis deduplication: {sorted(duplicate_finding_ids)}"
+            )
+
         aggregate_rag_label = self._score_to_label(aggregate_score)
         decision            = self._determine_decision(aggregate_score, all_findings, all_blockers, domain_scores)
 
@@ -221,6 +241,7 @@ class EnhancedARBOrchestrator:
             f"actions={len(all_actions)} adrs={len(all_adrs)} "
             f"score_corrections={len(synthesis['score_corrections'])} "
             f"removed_adrs={len(synthesis['removed_adr_ids'])} "
+            f"suppressed_dup_findings={len(synthesis['duplicate_finding_ids'])} "
             f"tokens={total_tokens} duration={total_duration_s:.2f}s"
         )
 
@@ -421,7 +442,7 @@ agents have completed their assessments and you are now producing the executive 
 ARB SCOPE REMINDER: This review covers architectural design completeness only — not operational readiness,
 test results, or deployed-state evidence. Your synthesis must stay within this scope.
 
-YOUR FIVE RESPONSIBILITIES:
+YOUR SIX RESPONSIBILITIES:
 
 1. SCORE RATIONALISATION — review domain scores for cross-cutting consistency:
    • You MAY LOWER a domain score if cross-domain evidence reveals a compounding risk not visible in
@@ -433,23 +454,21 @@ YOUR FIVE RESPONSIBILITIES:
    • Output scoreCorrections[] for every change. If no corrections needed, output an empty array.
 
 2. BLOCKER CONSOLIDATION — deduplicate cross-domain blockers:
-   Multiple domain agents independently assess overlapping concerns — it is expected that the same
-   architectural gap (e.g. missing RBAC design) may appear as a blocker in both the infrastructure
-   and NFR domains. Your job is to consolidate these into one canonical blocker per distinct issue.
-   
-   EXAMPLES OF DUPLICATE BLOCKERS TO CONSOLIDATE:
-   • Infrastructure: "Missing Authentication & Authorization (AUTHN_AUTHZ) design" 
-     + NFR: "Missing RBAC/IAM scope for EDMS service accounts" → SAME ISSUE → keep one
-   • Infrastructure: "Incomplete Key Vault and Secrets Management (KEY_VAULT_SECRETS) design"
-     + NFR: "Missing Key Vault and Secrets Management design for EDMS" → SAME ISSUE → keep one
-   • Infrastructure: "Absence of detailed PKI and Encryption (PKI_ENCRYPTION) design"
-     + NFR: "Absent encryption-at-rest and in-transit design for EDMS" → SAME ISSUE → keep one
-   
+   Multiple domain agents independently assess overlapping concerns — the same architectural gap
+   may appear as a blocker in more than one domain. Consolidate into one canonical blocker per
+   distinct issue.
+
+   PRIMARY CONSOLIDATION SIGNAL — check_category:
+   Two blockers sharing the same check_category from different domains almost always describe the
+   same underlying architectural gap. Confirm that the gap (the missing design element or absent
+   control) is the same issue, not merely the same category coincidentally applied.
+
    CONSOLIDATION RULES:
-   • Compare all blockers by subject matter (title + description), not by ID.
-   • Look for semantic similarity: same control area (auth, encryption, secrets, etc.) even if phrased differently.
-   • Where two or more blockers describe the same underlying gap, retain ONE — prefer the one with
-     the most specific description or from the domain most architecturally responsible for it.
+   • Use check_category as the first grouping key — same category across 2+ domains is a consolidation candidate.
+   • Confirm semantic equivalence: the missing design element or absent control must be the same gap,
+     even when phrased differently across domains.
+   • Where two or more blockers describe the same underlying gap, retain ONE — prefer the blocker
+     from the domain most architecturally responsible for that control area.
    • Output retainBlockerIds[] — the exact IDs of the blockers to keep after consolidation.
      All blocker IDs not in this list are treated as redundant duplicates and discarded.
    • If all blockers are distinct issues, retainBlockerIds must include every blocker ID.
@@ -482,6 +501,27 @@ YOUR FIVE RESPONSIBILITIES:
    • Non-security/DR blockers or score ≤ 3 → approve_with_conditions
    • Score ≥ 4 and no blockers → approve
 
+6. FINDING DEDUPLICATION — identify findings that describe the same architectural gap from different
+   domain perspectives. Domain agents for overlapping areas independently assess many of the same
+   control categories, producing findings for the same gap under different IDs.
+
+   PRIMARY DEDUPLICATION SIGNAL — check_category:
+   When two or more findings share the same check_category from different domains, they are strong
+   candidates for deduplication. Confirm that the gap described (missing design element, absent
+   control, incomplete specification) is the same underlying issue.
+
+   DEDUPLICATION RULES:
+   • The findings input is grouped by check_category. Groups marked MULTI-DOMAIN contain findings
+     from 2+ domains and are your primary candidates.
+   • For each multi-domain group: determine whether the findings describe the same gap.
+     If yes, identify the canonical finding (prefer the domain most responsible for that control area)
+     and mark the others as duplicates.
+   • Mark as duplicate ONLY when a clearly superior canonical finding already covers the same gap.
+     When findings add genuinely different perspectives or severity levels, retain both.
+   • Output duplicateFindingIds[] — IDs of findings made redundant by a canonical finding.
+     The canonical finding itself must NOT appear in this list.
+   • If no duplicates are found, output an empty array — never force deduplication.
+
 Respond ONLY with a valid JSON object. No preamble, no markdown outside the JSON."""
 
     async def _run_synthesis(
@@ -511,22 +551,26 @@ Respond ONLY with a valid JSON object. No preamble, no markdown outside the JSON
             else:
                 fd = "approve"
             return {
-                "final_domain_scores": dict(domain_scores),
-                "score_corrections":   [],
-                "retain_blocker_ids":  None,  # None = keep all (fallback doesn't deduplicate)
-                "filtered_adr_ids":    [a["id"] for a in all_adrs if a.get("id")],
-                "removed_adr_ids":     [],
-                "executive_rationale": f"Synthesis unavailable ({reason}). Domain scores used as-is.",
-                "final_decision":      fd,
-                "tokens_used":         0,
+                "final_domain_scores":   dict(domain_scores),
+                "score_corrections":     [],
+                "retain_blocker_ids":    None,  # None = keep all (fallback doesn't deduplicate)
+                "filtered_adr_ids":      [a["id"] for a in all_adrs if a.get("id")],
+                "removed_adr_ids":       [],
+                "duplicate_finding_ids": [],
+                "executive_rationale":   f"Synthesis unavailable ({reason}). Domain scores used as-is.",
+                "final_decision":        fd,
+                "tokens_used":           0,
             }
 
         # Build user prompt
+        from collections import defaultdict
+
         score_lines = "\n".join(
             f"  {d:<20} rag_score={s}" for d, s in domain_scores.items()
         )
         blocker_lines = "\n".join(
             f"  id={b.get('id', b.get('blocker_id', '?'))} "
+            f"check_category={b.get('check_category', '?')} "
             f"[{'SEC/DR' if b.get('is_security_or_dr') else 'OTHER '}] "
             f"{b.get('domain_slug', b.get('domain', ''))} — {b.get('title', '')} "
             f"(is_security_or_dr={b.get('is_security_or_dr')})"
@@ -536,10 +580,25 @@ Respond ONLY with a valid JSON object. No preamble, no markdown outside the JSON
             f"  {a.get('id', '?')} | {a.get('adr_type', '?')} | {a.get('title', a.get('decision', ''))}"
             for a in all_adrs
         ) or "  (none)"
-        finding_summary = "\n".join(
-            f"  {f.get('id', '?')} rag={f.get('rag_score', '?')} [{f.get('check_category', '')}] {f.get('title', '')}"
-            for f in all_findings if (f.get("rag_score") or 5) <= 3
-        )[:3000] or "  (no RED/AMBER findings)"
+
+        # Group RED/AMBER findings by check_category so the synthesizer can spot
+        # cross-domain overlaps without having to scan a flat 27-item list.
+        amber_red = [f for f in all_findings if (f.get("rag_score") or 5) <= 3]
+        by_category: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for f in amber_red:
+            by_category[f.get("check_category") or "UNKNOWN"].append(f)
+
+        finding_lines: List[str] = []
+        for cat, findings in sorted(by_category.items()):
+            domains_in_cat = {f.get("domain_slug") or f.get("domain") or "?" for f in findings}
+            overlap_flag = "  ← MULTI-DOMAIN — deduplication candidate" if len(domains_in_cat) > 1 else ""
+            finding_lines.append(f"\n  check_category: {cat}{overlap_flag}")
+            for f in findings:
+                dom = f.get("domain_slug") or f.get("domain") or "?"
+                finding_lines.append(
+                    f"    id={f.get('id', '?')}  domain={dom}  rag={f.get('rag_score', '?')}  {f.get('title', '')}"
+                )
+        finding_summary = "\n".join(finding_lines)[:4000] or "  (no RED/AMBER findings)"
 
         user_prompt = f"""== SYNTHESIS INPUT ==
 review_id:       {review_id}
@@ -549,23 +608,25 @@ aggregate_score: {aggregate_score}
 == DOMAIN SCORES FROM DOMAIN AGENTS ==
 {score_lines}
 
-== BLOCKERS ==
+== BLOCKERS (with check_category for consolidation) ==
 {blocker_lines}
 
 == ADRs TO GATE ==
 {adr_lines}
 
-== RED/AMBER FINDINGS ==
+== RED/AMBER FINDINGS GROUPED BY check_category ==
+(Groups marked MULTI-DOMAIN contain findings from 2+ domains — primary deduplication candidates)
 {finding_summary}
 
 == OUTPUT SCHEMA ==
 {{
   "scoreCorrections": [
-    {{"domain": "security", "original_score": 2, "corrected_score": 2, "reason": "No change"}}
+    {{"domain": "example_domain", "original_score": 3, "corrected_score": 2, "reason": "Specific cross-domain reason"}}
   ],
   "retainBlockerIds": ["INF-BLK-01", "NFR-BLK-05"],
   "filteredAdrIds": ["ADR-SOL-01"],
   "removedAdrIds":  [],
+  "duplicateFindingIds": ["NFR-F03", "NFR-F05"],
   "executiveRationale": "4-6 sentence paragraph written in EA voice for the ARB panel",
   "finalDecision": "approve | approve_with_conditions | defer | reject"
 }}"""
@@ -601,7 +662,11 @@ aggregate_score: {aggregate_score}
         score_corrections: List[Dict[str, Any]] = []
         for c in (parsed.get("scoreCorrections") or []):
             dom       = c.get("domain", "")
-            orig      = domain_scores.get(dom, c.get("original_score", 3))
+            if dom not in domain_scores:
+                # Synthesis hallucinated a domain not actually run (e.g. used schema example verbatim)
+                logger.warning(f"[SYNTHESIS] Ignoring score correction for unknown domain '{dom}'")
+                continue
+            orig      = domain_scores[dom]
             corrected = max(1, min(5, int(c.get("corrected_score", orig))))
             is_sec_dr = dom in ("security", "infrastructure")
             if is_sec_dr and corrected > orig:
@@ -655,22 +720,29 @@ aggregate_score: {aggregate_score}
 
         executive_rationale = parsed.get("executiveRationale", "")
 
+        # Finding deduplication — validate IDs against the actual finding set
+        all_finding_ids = {f.get("id") for f in all_findings if f.get("id")}
+        raw_dup_ids = parsed.get("duplicateFindingIds") or []
+        duplicate_finding_ids = [fid for fid in raw_dup_ids if fid in all_finding_ids]
+
         dropped_blockers = len(all_blocker_ids) - len(retain_blocker_ids) if retain_blocker_ids is not None else 0
         logger.info(
             f"[SYNTHESIS] Done — final_decision={final_decision} "
             f"corrections={len(score_corrections)} removed_adrs={len(removed_adr_ids)} "
-            f"dropped_duplicate_blockers={dropped_blockers} tokens={tokens_used}"
+            f"dropped_duplicate_blockers={dropped_blockers} "
+            f"duplicate_findings_suppressed={len(duplicate_finding_ids)} tokens={tokens_used}"
         )
 
         return {
-            "final_domain_scores": final_domain_scores,
-            "score_corrections":   score_corrections,
-            "retain_blocker_ids":  retain_blocker_ids,
-            "filtered_adr_ids":    filtered_adr_ids,
-            "removed_adr_ids":     removed_adr_ids,
-            "executive_rationale": executive_rationale,
-            "final_decision":      final_decision,
-            "tokens_used":         tokens_used,
+            "final_domain_scores":   final_domain_scores,
+            "score_corrections":     score_corrections,
+            "retain_blocker_ids":    retain_blocker_ids,
+            "filtered_adr_ids":      filtered_adr_ids,
+            "removed_adr_ids":       removed_adr_ids,
+            "duplicate_finding_ids": duplicate_finding_ids,
+            "executive_rationale":   executive_rationale,
+            "final_decision":        final_decision,
+            "tokens_used":           tokens_used,
         }
 
     # ── Retry wrapper ─────────────────────────────────────────────────────────

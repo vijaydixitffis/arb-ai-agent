@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     # LLM Provider Selection
     LLM_PROVIDER: str = "gemini"  # Options: "openai", "gemini", "openrouter"
+
+    # Mock LLM — when true, bypasses all LLM calls and uses the Bank EDMS fixture
+    USE_MOCK_LLM: bool = False
     
     # PostgreSQL Configuration
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/arb_ai_agent"

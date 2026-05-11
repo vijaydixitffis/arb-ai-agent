@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.core.config import settings
 from app.agents.enhanced_orchestrator import EnhancedARBOrchestrator
 from app.agents.enhanced_domain_agents import _rag_score_to_severity
 
@@ -106,14 +107,19 @@ async def trigger_review(
     if not review_id:
         raise HTTPException(status_code=400, detail="reviewId is required")
 
-    logger.info(f"[AGENT] trigger_review review_id={review_id} user={current_user}")
+    logger.info(f"[AGENT] trigger_review review_id={review_id} user={current_user} mock={settings.USE_MOCK_LLM}")
 
     try:
-        orchestrator = EnhancedARBOrchestrator(db)
-        result = await orchestrator.run_review(
-            review_id=review_id,
-            checklist_data=await orchestrator.prepare_checklist_data(review_id),
-        )
+        if settings.USE_MOCK_LLM:
+            from app.agents.mock_llm_populator import load_mock_result
+            logger.info("[AGENT] USE_MOCK_LLM=true — skipping LLM calls, loading Bank EDMS fixture")
+            result = await load_mock_result(review_id, db)
+        else:
+            orchestrator = EnhancedARBOrchestrator(db)
+            result = await orchestrator.run_review(
+                review_id=review_id,
+                checklist_data=await orchestrator.prepare_checklist_data(review_id),
+            )
     except Exception as exc:
         logger.exception(f"[AGENT] Orchestration failed for {review_id}")
         raise HTTPException(status_code=500, detail=f"Review orchestration failed: {exc}")
@@ -208,7 +214,24 @@ def _persist_results(db: Session, review_id: str, result: Dict[str, Any]) -> Non
     except Exception as exc:
         logger.error(f"[AGENT] Review row update failed (continuing): {exc}")
 
-    # ── 2. Domain scores (full DomainSummary upsert) ──────────────────────────
+    # ── 2. Domain scores (delete stale rows, then upsert) ─────────────────────
+    # Delete any domain rows from previous runs that are not in the current result.
+    # This removes phantom rows (e.g. a "security" row from a buggy prior run)
+    # without discarding rows that are simply being refreshed by this run.
+    current_domain_slugs = set(result.get("domain_scores", {}).keys())
+    try:
+        with db.begin_nested():
+            (
+                db.query(DomainScore)
+                .filter(
+                    DomainScore.review_id == review_id,
+                    ~DomainScore.domain.in_(current_domain_slugs),
+                )
+                .delete(synchronize_session=False)
+            )
+    except Exception as exc:
+        logger.error(f"[AGENT] DomainScore stale-row delete failed: {exc}")
+
     domain_summaries = result.get("domain_summaries", {})
     saved_scores = 0
     for domain_slug, score_val in result.get("domain_scores", {}).items():
@@ -305,7 +328,7 @@ def _persist_results(db: Session, review_id: str, result: Dict[str, Any]) -> Non
                     review_id            = review_id,
                     recommendation_id    = _str(rec.get("id")) or f"{domain_slug}-REC-auto",
                     domain               = domain_slug,
-                    priority             = _str(rec.get("priority")) or "MEDIUM",
+                    priority             = (_str(rec.get("priority")) or "medium").lower(),
                     title                = title,
                     rationale            = _str(rec.get("rationale")),
                     approved_pattern_ref = _str(rec.get("approved_pattern_ref")),

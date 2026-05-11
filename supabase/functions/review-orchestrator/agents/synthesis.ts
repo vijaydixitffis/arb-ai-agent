@@ -39,6 +39,7 @@ export interface SynthesisResult {
   retainBlockerIds:    string[] | null  // canonical blocker IDs after cross-domain dedup; null = keep all
   filteredAdrIds:      string[]         // ADR IDs retained after architectural-choice gate
   removedAdrIds:       string[]         // ADR IDs removed (documentation-only — actions used instead)
+  duplicateFindingIds: string[]         // finding IDs suppressed as cross-domain duplicates
   executiveRationale:  string
   finalDecision:       string
   tokensUsed:          number
@@ -53,7 +54,7 @@ agents have completed their assessments and you are now producing the executive 
 ARB SCOPE REMINDER: This review covers architectural design completeness only — not operational readiness,
 test results, or deployed-state evidence. Your synthesis must stay within this scope.
 
-YOUR FIVE RESPONSIBILITIES:
+YOUR SIX RESPONSIBILITIES:
 
 1. SCORE RATIONALISATION — review domain scores for cross-cutting consistency:
    • You MAY LOWER a domain score if cross-domain evidence reveals a compounding risk not visible in
@@ -65,32 +66,21 @@ YOUR FIVE RESPONSIBILITIES:
    • Output scoreCorrections[] for every change. If no corrections needed, output an empty array.
 
 2. BLOCKER CONSOLIDATION — deduplicate cross-domain blockers:
-   Multiple domain agents independently assess overlapping concerns — it is expected that the same
-   architectural gap (e.g. missing RBAC design) may appear as a blocker in both the infrastructure
-   and NFR domains. Your job is to consolidate these into one canonical blocker per distinct issue.
-   
-   GENERIC APPROACH TO DUPLICATE BLOCKER CONSOLIDATION:
-   Use semantic similarity analysis to identify blockers that describe the same underlying architectural gap,
-   even when phrased differently across domains. Look for:
-   - Same component/system (API Gateway, Authentication, Database, etc.)
-   - Same missing element (design, implementation, configuration, specification)
-   - Same control area (security, performance, observability, etc.)
-   - Same architectural concern (missing, incomplete, absent, not defined, etc.)
-   
+   Multiple domain agents independently assess overlapping concerns — the same architectural gap
+   may appear as a blocker in more than one domain. Consolidate into one canonical blocker per
+   distinct issue.
+
+   PRIMARY CONSOLIDATION SIGNAL — check_category:
+   Two blockers sharing the same check_category from different domains almost always describe the
+   same underlying architectural gap. Confirm that the gap (the missing design element or absent
+   control) is the same issue, not merely the same category coincidentally applied.
+
    CONSOLIDATION RULES:
-   • Compare all blockers by subject matter (title + description), not by ID.
-   • Use semantic similarity to identify blockers addressing the same architectural concern:
-     * Same component/system (e.g., API Gateway, Database, Authentication Service)
-     * Same missing element (design, implementation, configuration, specification)
-     * Same control area (security, performance, observability, integration, etc.)
-     * Same issue type (missing, incomplete, absent, not defined, inadequate, etc.)
-   • Cross-domain overlap patterns to watch for:
-     * Infrastructure + Security + NFR: auth, encryption, secrets, monitoring concerns
-     * Integration + API: API Gateway, service discovery, contract concerns
-     * Application + Data: database design, data flow, validation concerns
-     * Any domain pair can have overlapping architectural elements
-   • Where two or more blockers describe the same underlying gap, retain ONE — prefer the one with
-     the most specific description or from the domain most architecturally responsible for that concern.
+   • Use check_category as the first grouping key — same category across 2+ domains is a consolidation candidate.
+   • Confirm semantic equivalence: the missing design element or absent control must be the same gap,
+     even when phrased differently across domains.
+   • Where two or more blockers describe the same underlying gap, retain ONE — prefer the blocker
+     from the domain most architecturally responsible for that control area.
    • Output retainBlockerIds[] — the exact IDs of the blockers to keep after consolidation.
      All blocker IDs not in this list are treated as redundant duplicates and discarded.
    • If all blockers are distinct issues, retainBlockerIds must include every blocker ID.
@@ -123,6 +113,27 @@ YOUR FIVE RESPONSIBILITIES:
    • Non-security/DR blockers or score ≤ 3 → approve_with_conditions
    • Score ≥ 4 and no blockers → approve
 
+6. FINDING DEDUPLICATION — identify findings that describe the same architectural gap from different
+   domain perspectives. Domain agents for overlapping areas independently assess many of the same
+   control categories, producing findings for the same gap under different IDs.
+
+   PRIMARY DEDUPLICATION SIGNAL — check_category:
+   When two or more findings share the same check_category from different domains, they are strong
+   candidates for deduplication. Confirm that the gap described (missing design element, absent
+   control, incomplete specification) is the same underlying issue.
+
+   DEDUPLICATION RULES:
+   • The findings input is grouped by check_category. Groups marked MULTI-DOMAIN contain findings
+     from 2+ domains and are your primary candidates.
+   • For each multi-domain group: determine whether the findings describe the same gap.
+     If yes, identify the canonical finding (prefer the domain most responsible for that control area)
+     and mark the others as duplicates.
+   • Mark as duplicate ONLY when a clearly superior canonical finding already covers the same gap.
+     When findings add genuinely different perspectives or severity levels, retain both.
+   • Output duplicateFindingIds[] — IDs of findings made redundant by a canonical finding.
+     The canonical finding itself must NOT appear in this list.
+   • If no duplicates are found, output an empty array — never force deduplication.
+
 Respond ONLY with a valid JSON object. No preamble, no markdown outside the JSON.`
 
 // ── User prompt builder ───────────────────────────────────────────────────────
@@ -133,18 +144,33 @@ function buildSynthesisPrompt(input: SynthesisInput): string {
     .join('\n')
 
   const blockerLines = input.allBlockers.map(b =>
-    `  id=${b.id} [${b.is_security_or_dr ? 'SEC/DR' : 'OTHER '}] ${b.domain} — ${b.title} (is_security_or_dr=${b.is_security_or_dr})`
+    `  id=${b.id ?? b.blocker_id} check_category=${b.check_category ?? '?'} [${b.is_security_or_dr ? 'SEC/DR' : 'OTHER '}] ${b.domain} — ${b.title} (is_security_or_dr=${b.is_security_or_dr})`
   ).join('\n') || '  (none)'
 
   const adrLines = input.allAdrs.map(a =>
     `  ${a.id} | ${a.adr_type} | ${a.title}`
   ).join('\n') || '  (none)'
 
-  const findingSummary = input.allFindings
-    .filter(f => (f.rag_score ?? 5) <= 3)
-    .map(f => `  ${f.id} rag=${f.rag_score} [${f.check_category}] ${f.title}`)
-    .slice(0, 30)
-    .join('\n') || '  (no RED/AMBER findings)'
+  // Group RED/AMBER findings by check_category so the synthesizer can spot
+  // cross-domain overlaps without scanning a flat list.
+  const amberRed = input.allFindings.filter(f => (f.rag_score ?? 5) <= 3)
+  const byCategory = new Map<string, typeof amberRed>()
+  for (const f of amberRed) {
+    const cat = f.check_category || 'UNKNOWN'
+    if (!byCategory.has(cat)) byCategory.set(cat, [])
+    byCategory.get(cat)!.push(f)
+  }
+  const findingLines: string[] = []
+  for (const [cat, findings] of [...byCategory.entries()].sort()) {
+    const domains = new Set(findings.map(f => f.domain ?? f.domain_slug ?? '?'))
+    const flag = domains.size > 1 ? '  ← MULTI-DOMAIN — deduplication candidate' : ''
+    findingLines.push(`\n  check_category: ${cat}${flag}`)
+    for (const f of findings) {
+      const dom = f.domain ?? f.domain_slug ?? '?'
+      findingLines.push(`    id=${f.id}  domain=${dom}  rag=${f.rag_score}  ${f.title ?? ''}`)
+    }
+  }
+  const findingSummary = findingLines.join('\n').slice(0, 4000) || '  (no RED/AMBER findings)'
 
   return `== SYNTHESIS INPUT ==
 review_id:      ${input.reviewId}
@@ -154,23 +180,25 @@ aggregate_score: ${input.aggregateScore}
 == DOMAIN SCORES FROM DOMAIN AGENTS ==
 ${domainScoreLines}
 
-== BLOCKERS ==
+== BLOCKERS (with check_category for consolidation) ==
 ${blockerLines}
 
 == ADRs TO GATE ==
 ${adrLines}
 
-== RED/AMBER FINDINGS (up to 30) ==
+== RED/AMBER FINDINGS GROUPED BY check_category ==
+(Groups marked MULTI-DOMAIN contain findings from 2+ domains — primary deduplication candidates)
 ${findingSummary}
 
 == OUTPUT SCHEMA ==
 {
   "scoreCorrections": [
-    { "domain": "security", "original_score": 2, "corrected_score": 2, "reason": "No change — consistent with findings" }
+    { "domain": "example_domain", "original_score": 3, "corrected_score": 2, "reason": "Specific cross-domain reason" }
   ],
   "retainBlockerIds": ["INF-BLK-01", "NFR-BLK-05"],
-  "filteredAdrIds": ["ADR-SEC-01", "ADR-APP-02"],
+  "filteredAdrIds": ["ADR-SOL-01", "ADR-APP-02"],
   "removedAdrIds":  ["ADR-INF-03"],
+  "duplicateFindingIds": ["NFR-F03", "NFR-F05"],
   "executiveRationale": "4-6 sentence paragraph written in EA voice for the ARB panel",
   "finalDecision": "approve | approve_with_conditions | defer | reject"
 }`
@@ -196,14 +224,15 @@ function buildFallbackResult(input: SynthesisInput, reason: string): SynthesisRe
   }
 
   return {
-    finalDomainScores:  { ...input.domainScores },
-    scoreCorrections:   [],
-    retainBlockerIds:   null,  // null = keep all (fallback doesn't deduplicate)
-    filteredAdrIds:     input.allAdrs.map(a => a.id).filter(Boolean),
-    removedAdrIds:      [],
-    executiveRationale: `Synthesis step unavailable (${reason}). Domain agent scores are used as-is. Decision is determined by Tier-1 gate logic only.`,
+    finalDomainScores:   { ...input.domainScores },
+    scoreCorrections:    [],
+    retainBlockerIds:    null,  // null = keep all (fallback doesn't deduplicate)
+    filteredAdrIds:      input.allAdrs.map(a => a.id).filter(Boolean),
+    removedAdrIds:       [],
+    duplicateFindingIds: [],
+    executiveRationale:  `Synthesis step unavailable (${reason}). Domain agent scores are used as-is. Decision is determined by Tier-1 gate logic only.`,
     finalDecision,
-    tokensUsed:         0,
+    tokensUsed:          0,
   }
 }
 
@@ -239,8 +268,13 @@ export async function runSynthesis(input: SynthesisInput): Promise<SynthesisResu
   const corrections: ScoreCorrection[] = []
 
   for (const c of (parsed.scoreCorrections ?? [])) {
-    const domain  = c.domain as string
-    const origInInput = input.domainScores[domain] ?? c.original_score
+    const domain = c.domain as string
+    if (!(domain in input.domainScores)) {
+      // Synthesis hallucinated a domain not actually run (e.g. used schema example verbatim)
+      console.warn(`[SYNTHESIS] Ignoring score correction for unknown domain '${domain}'`)
+      continue
+    }
+    const origInInput = input.domainScores[domain]
     const corrected   = Math.max(1, Math.min(5, Number(c.corrected_score)))
 
     // Tier-1 floor: never raise Security or DR/HA above their agent score via synthesis
@@ -298,13 +332,28 @@ export async function runSynthesis(input: SynthesisInput): Promise<SynthesisResu
     finalDecision = 'approve'
   }
 
+  // Finding deduplication — validate IDs against the actual finding set
+  const allFindingIds = new Set(input.allFindings.map(f => f.id).filter(Boolean))
+  const rawDupIds: string[] = parsed.duplicateFindingIds ?? []
+  const duplicateFindingIds = rawDupIds.filter(id => allFindingIds.has(id))
+
+  const droppedBlockers = retainBlockerIds !== null
+    ? input.allBlockers.length - retainBlockerIds.length
+    : 0
+  console.log(
+    `[SYNTHESIS] Done — finalDecision=${finalDecision} corrections=${corrections.length} ` +
+    `removedAdrs=${removedAdrIds.length} droppedDuplicateBlockers=${droppedBlockers} ` +
+    `duplicateFindingsSuppressed=${duplicateFindingIds.length} tokens=${tokensUsed}`
+  )
+
   return {
     finalDomainScores,
-    scoreCorrections:   corrections,
+    scoreCorrections:    corrections,
     retainBlockerIds,
     filteredAdrIds,
     removedAdrIds,
-    executiveRationale: parsed.executiveRationale ?? '',
+    duplicateFindingIds,
+    executiveRationale:  parsed.executiveRationale ?? '',
     finalDecision,
     tokensUsed,
   }
