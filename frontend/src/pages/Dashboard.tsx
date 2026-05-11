@@ -257,7 +257,7 @@ export default function Dashboard() {
                         <td className="py-3 px-4 text-sm text-gray-600">{submission.created_date}</td>
                         <td className="py-3 px-4">
                           <div className="flex gap-2">
-                            {['drafting', 'queued', 'returned', 'draft'].includes(submission.status) ? (
+                            {!['analysing', 'submitted'].includes(submission.status) ? (
                               <Button
                                 variant="outline"
                                 size="sm"

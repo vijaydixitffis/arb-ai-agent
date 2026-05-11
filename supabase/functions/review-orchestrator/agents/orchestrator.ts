@@ -132,7 +132,7 @@ export class OrchestratorAgent {
       solution:       ['solution'],
       business:       ['business'],
       application:    ['application', 'software'],
-      integration:    ['integration', 'api'],
+      integration:    ['integration'],
       data:           ['data'],
       infrastructure: ['infra', 'security'],
       devsecops:      ['devsecops', 'engg_quality'],

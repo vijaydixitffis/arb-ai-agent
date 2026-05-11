@@ -27,6 +27,7 @@ export default function EARRSubmission() {
 
   const [isLoading, setIsLoading] = useState(true)
   const [submissionId, setSubmissionId] = useState<string | null>(null)
+  const [reviewStatus, setReviewStatus] = useState<string | null>(null)
   const [selectedDomainForModal, setSelectedDomainForModal] = useState<string | null>(null)
   const [isDomainModalOpen, setIsDomainModalOpen] = useState(false)
   const [selectedSubsection, setSelectedSubsection] = useState<string | null>(null)
@@ -66,6 +67,20 @@ export default function EARRSubmission() {
           const draftData = await reviewService.loadDraftData(urlReviewId)
           const formData = draftData.formData || {}
 
+          // scope_tags are always loaded regardless of whether form_data is present
+          // (already-processed reviews have LLM output in report_json but no form_data)
+          const domainSlugs: string[] = (draftData.review?.scope_tags || []).map((s: string) => s.toLowerCase())
+          setSelectedDomains(domainSlugs)
+          setReviewStatus(draftData.review?.status ?? null)
+          domainSlugs.forEach((domainSlug: string) => loadDomainMetadata(domainSlug))
+
+          // EA return context is also independent of form_data
+          if (draftData.review?.status === 'returned') {
+            setIsReturned(true)
+            setReturnDomains(draftData.review?.ea_review?.return_domains || [])
+            setReworkGaps(draftData.review?.ea_review?.rework_gaps || [])
+          }
+
           if (formData && Object.keys(formData).length > 0) {
             setProjectInfo({
               project_name: formData.project_name || formData.solution_name || '',
@@ -80,22 +95,8 @@ export default function EARRSubmission() {
               architectureDisposition: formData.architecture_disposition || ''
             })
 
-            const domainSlugs: string[] = draftData.review?.scope_tags || []
-            setSelectedDomains(domainSlugs)
-
-            // EA return context
-            if (draftData.review?.status === 'returned') {
-              setIsReturned(true)
-              setReturnDomains(draftData.review?.ea_review?.return_domains || [])
-              setReworkGaps(draftData.review?.ea_review?.rework_gaps || [])
-            }
-
             const loadedDomainData: Record<string, DomainData> = formData.domain_data || {}
             setDomainData(loadedDomainData)
-
-            domainSlugs.forEach((domainSlug: string) => {
-              loadDomainMetadata(domainSlug)
-            })
           }
 
           const uploadedArtefacts = await reviewService.getReviewArtefacts(urlReviewId)
@@ -309,16 +310,7 @@ export default function EARRSubmission() {
   const handleSave = async () => {
     try {
       const scopeTags = selectedDomains
-      const formData = {
-        project_name: projectInfo.project_name,
-        problem_statement: projectInfo.problem_statement,
-        stakeholders: projectInfo.stakeholders,
-        business_drivers: projectInfo.business_drivers,
-        target_business_outcomes: projectInfo.target_business_outcomes,
-        ptx_gate: reviewType.ptxGate,
-        architecture_disposition: reviewType.architectureDisposition,
-        domain_data: domainData
-      }
+      const formData = buildFormData()
 
       if (submissionId) {
         await reviewService.updateDraft(submissionId, { form_data: formData, scope_tags: scopeTags })
@@ -335,8 +327,42 @@ export default function EARRSubmission() {
     }
   }
 
+  // Builds the current form_data object from component state
+  const buildFormData = () => ({
+    project_name: projectInfo.project_name,
+    problem_statement: projectInfo.problem_statement,
+    stakeholders: projectInfo.stakeholders,
+    business_drivers: projectInfo.business_drivers,
+    target_business_outcomes: projectInfo.target_business_outcomes,
+    ptx_gate: reviewType.ptxGate,
+    architecture_disposition: reviewType.architectureDisposition,
+    domain_data: domainData
+  })
+
+  // Save form changes without altering review status (for already-processed reviews)
+  const handleSaveChanges = async () => {
+    try {
+      const scopeTags = selectedDomains
+      const formData = buildFormData()
+      if (!submissionId) return
+      await reviewService.updateDraft(submissionId, { form_data: formData, scope_tags: scopeTags })
+      alert('Changes saved successfully.')
+    } catch (error) {
+      console.error('Failed to save changes:', error)
+      alert('Failed to save changes. Please try again.')
+    }
+  }
+
   const handleSubmit = async () => {
     try {
+      // For already-processed reviews, just save form_data without re-queuing
+      const isProcessed = reviewStatus && !['drafting', 'draft', 'queued', 'returned'].includes(reviewStatus)
+      if (isProcessed && submissionId) {
+        await handleSaveChanges()
+        navigate('/dashboard')
+        return
+      }
+
       // Check 1: at least one selected domain must have some input (artefact or checklist answer)
       const domainsWithInput = selectedDomains.filter(slug => {
         const data = domainData[slug]
@@ -356,16 +382,7 @@ export default function EARRSubmission() {
       }
 
       const scopeTags = selectedDomains
-      const formData = {
-        project_name: projectInfo.project_name,
-        problem_statement: projectInfo.problem_statement,
-        stakeholders: projectInfo.stakeholders,
-        business_drivers: projectInfo.business_drivers,
-        target_business_outcomes: projectInfo.target_business_outcomes,
-        ptx_gate: reviewType.ptxGate,
-        architecture_disposition: reviewType.architectureDisposition,
-        domain_data: domainData
-      }
+      const formData = buildFormData()
 
       let reviewId = submissionId
 
@@ -586,22 +603,27 @@ export default function EARRSubmission() {
         </div>
 
         {/* Action buttons — inline below domain grid */}
-        <div className="flex justify-between items-center mt-8 pt-6 border-t border-slate-200">
-          <button
-            onClick={handleSave}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:border-slate-400 transition-all"
-          >
-            <Save className="w-4 h-4" />
-            Save Draft
-          </button>
-          <button
-            onClick={handleSubmit}
-            className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-all shadow-sm"
-          >
-            <Send className="w-4 h-4" />
-            Submit for Review
-          </button>
-        </div>
+        {(() => {
+          const isProcessed = reviewStatus && !['drafting', 'draft', 'queued', 'returned'].includes(reviewStatus)
+          return (
+            <div className="flex justify-between items-center mt-8 pt-6 border-t border-slate-200">
+              <button
+                onClick={handleSave}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 hover:border-slate-400 transition-all"
+              >
+                <Save className="w-4 h-4" />
+                Save Draft
+              </button>
+              <button
+                onClick={handleSubmit}
+                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-all shadow-sm"
+              >
+                <Send className="w-4 h-4" />
+                {isProcessed ? 'Save Changes' : 'Submit for Review'}
+              </button>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Domain detail modal */}

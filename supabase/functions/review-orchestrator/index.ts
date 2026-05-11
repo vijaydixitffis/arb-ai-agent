@@ -83,7 +83,7 @@ serve(async (req) => {
       solution:       ['solution'],
       business:       ['business'],
       application:    ['application', 'software'],
-      integration:    ['integration', 'api'],
+      integration:    ['integration'],
       data:           ['data'],
       infrastructure: ['infra', 'security'],
       devsecops:      ['devsecops', 'engg_quality'],
@@ -148,12 +148,18 @@ serve(async (req) => {
     const now = new Date().toISOString()
 
     // 4a. Update reviews table
+    // Always carry form_data forward so SA can edit the submission after LLM processing.
+    const reportToSave = {
+      ...reviewResult.fullReport,
+      form_data: review.report_json?.form_data ?? reviewResult.fullReport.form_data,
+    }
+
     const { error: updateError } = await adminSupabase
       .from('reviews')
       .update({
         status:                 'review_ready',
         decision:               reviewResult.decision,
-        report_json:            reviewResult.fullReport,
+        report_json:            reportToSave,
         tokens_used:            reviewResult.tokensUsed,
         processing_time_ms:     processingTime,
         llm_raw_response:       reviewResult.rawResponse,
@@ -230,8 +236,8 @@ serve(async (req) => {
         .insert(reviewResult.recommendations.map(r => ({
           review_id:            reviewId,
           recommendation_id:    r.recommendation_id,
-          domain:               null, // Set to null to avoid chk_rec_domain constraint
-          priority:             r.priority             ?? 'MEDIUM',
+          domain:               r.domain               ?? 'general',
+          priority:             (r.priority ?? 'medium').toLowerCase(),
           title:                r.title                ?? null,
           rationale:            r.rationale            ?? null,
           approved_pattern_ref: r.approved_pattern_ref ?? null,
@@ -240,7 +246,7 @@ serve(async (req) => {
           applies_to_finding_id: r.applies_to_finding_id ?? null,
           applies_to_adr_id:    r.applies_to_adr_id    ?? null,
           is_agent_generated:   true,
-          // kb_source_ref:        r.kb_source_ref        ?? [], // Column doesn't exist in schema
+          kb_source_ref:        r.kb_source_ref        ?? [],
         })))
       if (recErr) console.error('recommendations insert failed:', recErr.message)
     }
