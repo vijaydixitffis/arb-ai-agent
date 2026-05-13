@@ -82,7 +82,7 @@ serve(async (req) => {
     const agentDomainMap: Record<string, string[]> = {
       solution:       ['solution'],
       business:       ['business'],
-      application:    ['application', 'software'],
+      application:    ['application'],
       integration:    ['integration'],
       data:           ['data'],
       infrastructure: ['infra', 'security'],

@@ -68,6 +68,7 @@ export const reviewService = {
         scope_tags: data.scope_tags,
         sa_user_id: data.sa_user_id,
         status: 'drafting',
+        llm_model: 'gemini-2.5-flash-lite',
         report_json: { form_data: data.form_data }
       })
       .select()
@@ -206,7 +207,7 @@ export const reviewService = {
         scope_tags: data.scope_tags,
         sa_user_id: data.sa_user_id,
         status: 'queued',
-        llm_model: data.llm_model || 'gpt-4o'
+        llm_model: data.llm_model || 'gemini-2.5-flash-lite'
       })
       .select()
       .single()

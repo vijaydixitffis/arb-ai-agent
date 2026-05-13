@@ -66,7 +66,6 @@ export function getFrontendTabsForAgent(agentDomain: string): string[] {
     solution:     ['solution'],
     business:     ['business'],
     application:  ['application'],
-    software:     ['application'],   // app-soft-* lives in same tab
     integration:  ['integration'],
     api:          ['integration'],   // int-check-* lives in same tab
     security:     ['infrastructure', 'nfr'],  // infra-sec-* + nfr-sec-*
@@ -348,7 +347,6 @@ export function getKbCategoriesForAgent(agentDomain: string): string[] {
     solution:     ['ea_principles', 'ea_standards'],
     business:     ['ea_principles', 'ea_standards'],
     application:  ['ea_principles', 'ea_standards'],
-    software:     ['ea_principles', 'ea_standards'],
     integration:  ['integration_principles', 'ea_standards'],
     api:          ['integration_principles', 'ea_standards'],
     security:     ['ea_principles', 'ea_standards'],

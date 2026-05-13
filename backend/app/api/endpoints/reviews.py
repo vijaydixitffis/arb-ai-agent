@@ -532,7 +532,7 @@ async def update_review(review_id: str, review_data: dict, current_user: tuple =
             raise HTTPException(status_code=404, detail="Review not found")
         if str(review.sa_user_id) != user_id_token:
             raise HTTPException(status_code=403, detail="You can only update your own reviews")
-        if review.status not in ['drafting', 'queued', 'draft', 'pending', 'submitted', 'review_ready']:
+        if review.status not in ['drafting', 'queued', 'draft', 'pending', 'submitted', 'review_ready', 'returned']:
             raise HTTPException(status_code=403, detail="You can only update draft, queued, or reviewed reviews")
         review = service.update_review(review_id, review_data)
     else:
