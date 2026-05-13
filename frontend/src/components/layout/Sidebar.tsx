@@ -1,48 +1,57 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { LayoutDashboard, FileText, ClipboardCheck, Settings, LogOut, User } from 'lucide-react'
-import { Button } from '../ui/Button'
 
 const menuItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['solution_architect', 'enterprise_architect', 'arb_admin'] },
-  { icon: FileText, label: 'My Submissions', path: '/submissions', roles: ['solution_architect'] },
-  { icon: ClipboardCheck, label: 'Reviews', path: '/reviews', roles: ['enterprise_architect', 'arb_admin'] },
-  { icon: Settings, label: 'Settings', path: '/settings', roles: ['solution_architect', 'enterprise_architect', 'arb_admin'] },
+  { icon: LayoutDashboard, label: 'Dashboard',      path: '/dashboard',  roles: ['solution_architect', 'enterprise_architect', 'arb_admin'] },
+  { icon: FileText,        label: 'My Submissions', path: '/submissions', roles: ['solution_architect'] },
+  { icon: ClipboardCheck,  label: 'Reviews',        path: '/reviews',    roles: ['enterprise_architect', 'arb_admin'] },
+  { icon: Settings,        label: 'Settings',       path: '/settings',   roles: ['solution_architect', 'enterprise_architect', 'arb_admin'] },
 ]
+
+const roleLabel: Record<string, string> = {
+  solution_architect:   'Solution Architect',
+  enterprise_architect: 'Enterprise Architect',
+  arb_admin:            'ARB Administrator',
+}
 
 export default function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
-  const user = useAuthStore((state) => state.user)
-  const logout = useAuthStore((state) => state.logout)
+  const user     = useAuthStore((state) => state.user)
+  const logout   = useAuthStore((state) => state.logout)
 
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
 
-  const filteredMenuItems = menuItems.filter(item => 
+  const filteredMenuItems = menuItems.filter(item =>
     item.roles.includes(user?.role || '')
   )
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-screen">
+    <aside className="w-64 bg-slate-900 flex flex-col h-screen flex-shrink-0">
+
       {/* Logo */}
-      <div className="p-6 border-b border-gray-200">
+      <div className="px-5 py-6 border-b border-slate-700/50">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-lg">ARB</span>
+          <div className="w-10 h-10 bg-teal-600 rounded-lg flex items-center justify-center flex-shrink-0">
+            <span className="text-white font-bold text-sm tracking-tight">ARB</span>
           </div>
           <div>
-            <h1 className="font-bold text-lg text-gray-900">ARB AI Agent</h1>
-            <p className="text-xs text-gray-500">Architecture Review Board</p>
+            <h1 className="font-bold text-base text-white leading-tight">
+              ARB <span className="text-teal-400">AI</span> Agent
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">Architecture Review Board</p>
           </div>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4">
-        <ul className="space-y-2">
+      <nav className="flex-1 px-3 py-4 overflow-y-auto">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest px-3 mb-2">Navigation</p>
+        <ul className="space-y-0.5">
           {filteredMenuItems.map((item) => {
             const Icon = item.icon
             const isActive = location.pathname === item.path
@@ -50,14 +59,17 @@ export default function Sidebar() {
               <li key={item.path}>
                 <button
                   onClick={() => navigate(item.path)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    isActive 
-                      ? 'bg-blue-50 text-blue-700' 
-                      : 'text-gray-700 hover:bg-gray-100'
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? 'bg-teal-500/15 text-teal-400 font-medium'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  <Icon className="w-5 h-5" />
-                  <span className="font-medium">{item.label}</span>
+                  <Icon className="w-4 h-4 flex-shrink-0" />
+                  <span>{item.label}</span>
+                  {isActive && (
+                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-teal-400" />
+                  )}
                 </button>
               </li>
             )
@@ -66,26 +78,25 @@ export default function Sidebar() {
       </nav>
 
       {/* User Profile */}
-      <div className="p-4 border-t border-gray-200">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
-            <User className="w-5 h-5 text-gray-600" />
+      <div className="px-3 py-4 border-t border-slate-700/50">
+        <div className="flex items-center gap-3 px-2 mb-3">
+          <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center flex-shrink-0">
+            <User className="w-4 h-4 text-slate-300" />
           </div>
-          <div className="flex-1">
-            <p className="font-medium text-sm text-gray-900">{user?.name}</p>
-            <p className="text-xs text-gray-500 capitalize">{user?.role?.replace('_', ' ')}</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">{user?.name}</p>
+            <p className="text-xs text-teal-400">{roleLabel[user?.role || ''] ?? user?.role}</p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
+        <button
           onClick={handleLogout}
-          className="w-full"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
         >
-          <LogOut className="w-4 h-4 mr-2" />
-          Logout
-        </Button>
+          <LogOut className="w-4 h-4" />
+          Sign Out
+        </button>
       </div>
+
     </aside>
   )
 }

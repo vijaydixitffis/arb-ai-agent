@@ -123,75 +123,153 @@ export default function Dashboard() {
           </button>
         </div>
       )}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
-        <p className="text-gray-600">
-          {isSolutionArchitect
-            ? 'Overview of your Review Requests'
-            : 'Overview of ARB reviews'}
-        </p>
+      {/* Welcome Banner */}
+      <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-xl p-6 mb-8 text-white flex items-center justify-between">
+        <div>
+          <p className="text-teal-400 text-xs font-semibold uppercase tracking-widest mb-1">
+            Intelligent Architecture Governance
+          </p>
+          <h1 className="text-2xl font-bold text-white">
+            Welcome back, {user?.name?.split(' ')[0] ?? user?.name}
+          </h1>
+          <p className="text-slate-300 text-sm mt-1">
+            {isSolutionArchitect
+              ? submissions.length === 0
+                ? 'No active submissions — start an EA Review to begin.'
+                : `You have ${submissions.filter(s => ['drafting','queued','analysing','submitted','review_ready'].includes(s.status)).length} active submission${submissions.filter(s => ['drafting','queued','analysing','submitted','review_ready'].includes(s.status)).length !== 1 ? 's' : ''} in progress.`
+              : `${pendingReviews} review${pendingReviews !== 1 ? 's' : ''} awaiting your decision${pendingReviews > 0 ? ' — SLA clock is running.' : '.'}`
+            }
+          </p>
+        </div>
+        <div className="hidden lg:flex items-center gap-2 flex-shrink-0 ml-6">
+          {[
+            { label: '✓ Approve',        color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+            { label: '⚡ w/ Actions',    color: 'bg-teal-500/20  text-teal-400  border-teal-500/30'  },
+            { label: '⏸ Defer',         color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+            { label: '✕ Reject',        color: 'bg-red-500/20   text-red-400   border-red-500/30'   },
+          ].map((d) => (
+            <span key={d.label} className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${d.color}`}>
+              {d.label}
+            </span>
+          ))}
+        </div>
       </div>
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Total Submissions</p>
-                <p className="text-3xl font-bold">{totalSubmissions}</p>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <FileText className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {isEnterpriseArchitect && (
+      {/* Statistics Cards — SA */}
+      {isSolutionArchitect && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600 mb-1">Pending Reviews</p>
-                  <p className="text-3xl font-bold">{pendingReviews}</p>
+                  <p className="text-sm text-gray-600 mb-1">Total Submissions</p>
+                  <p className="text-3xl font-bold">{totalSubmissions}</p>
                 </div>
-                <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
-                  <Clock className="w-6 h-6 text-amber-600" />
+                <div className="w-12 h-12 bg-teal-50 rounded-lg flex items-center justify-center">
+                  <FileText className="w-6 h-6 text-teal-600" />
                 </div>
               </div>
             </CardContent>
           </Card>
-        )}
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Approved</p>
+                  <p className="text-3xl font-bold">{approved}</p>
+                </div>
+                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                  <CheckCircle2 className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Rejected</p>
+                  <p className="text-3xl font-bold">{rejected}</p>
+                </div>
+                <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
+                  <XCircle className="w-6 h-6 text-red-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Approved</p>
-                <p className="text-3xl font-bold">{approved}</p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                <CheckCircle2 className="w-6 h-6 text-green-600" />
-              </div>
+      {/* Governance KPI Cards — EA / Admin */}
+      {isEnterpriseArchitect && (() => {
+        const total    = reviews.length
+        const terminal = reviews.filter(r => ['approved','conditionally_approved','rejected','deferred','closed'].includes(r.status))
+        const approvedEA   = reviews.filter(r => ['approved','conditionally_approved'].includes(r.status)).length
+        const approvalRate = terminal.length > 0 ? Math.round((approvedEA / terminal.length) * 100) : 0
+        const pendingDecision = reviews.filter(r => r.status === 'review_ready').length
+        const returnedCount   = reviews.filter(r => r.status === 'returned').length
+        return (
+          <div className="mb-8">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">
+              Governance Overview
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Total Reviews</p>
+                      <p className="text-3xl font-bold">{total}</p>
+                    </div>
+                    <div className="w-10 h-10 bg-teal-50 rounded-lg flex items-center justify-center">
+                      <ClipboardList className="w-5 h-5 text-teal-600" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Pending Decision</p>
+                      <p className="text-3xl font-bold">{pendingDecision}</p>
+                    </div>
+                    <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                      <Clock className="w-5 h-5 text-amber-600" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Approval Rate</p>
+                      <p className="text-3xl font-bold">{approvalRate}<span className="text-lg font-medium text-gray-400">%</span></p>
+                    </div>
+                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Returned for Rework</p>
+                      <p className="text-3xl font-bold">{returnedCount}</p>
+                    </div>
+                    <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                      <XCircle className="w-5 h-5 text-orange-600" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Rejected</p>
-                <p className="text-3xl font-bold">{rejected}</p>
-              </div>
-              <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
-                <XCircle className="w-6 h-6 text-red-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        )
+      })()}
 
 
       <div className="grid gap-6">
@@ -207,7 +285,7 @@ export default function Dashboard() {
               <CardTitle>Recent Review Submissions</CardTitle>
               <Button
                 onClick={() => setIsEarrModalOpen(true)}
-                className="flex items-center gap-2 bg-gray-700 hover:bg-gray-800 text-white border-gray-700"
+                className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white border-teal-600"
               >
                 <Plus className="w-4 h-4" />
                 EA Review

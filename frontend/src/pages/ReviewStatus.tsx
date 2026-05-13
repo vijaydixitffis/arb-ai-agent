@@ -150,11 +150,41 @@ export default function ReviewStatus() {
     return 'text-red-600'
   }
 
+  const PIPELINE_STEPS = [
+    { label: 'Intake',    sublabel: 'Upload'     },
+    { label: 'Parse',     sublabel: 'Ingest'     },
+    { label: 'KB',        sublabel: 'Retrieval'  },
+    { label: 'Domain',    sublabel: 'Validation' },
+    { label: 'NFR',       sublabel: 'Scoring'    },
+    { label: 'Generate',  sublabel: 'ADRs'       },
+    { label: 'EA',        sublabel: 'Review'     },
+    { label: 'Publish',   sublabel: 'Schedule'   },
+  ]
+
+  const getActiveStep = (status: string): number => {
+    switch (status) {
+      case 'drafting':                                       return 0
+      case 'queued': case 'pending':                        return 1
+      case 'submitted': case 'analysing': case 'in_review': return 3
+      case 'review_ready':                                  return 5
+      case 'ea_reviewing': case 'ea_review': case 'returned': return 6
+      case 'approved': case 'conditionally_approved':
+      case 'rejected': case 'deferred': case 'closed':      return 7
+      default:                                              return 0
+    }
+  }
+
+  const isTerminal = (status: string) =>
+    ['approved','conditionally_approved','rejected','deferred','closed'].includes(status)
+
+  const activeStep    = reviewStatus ? getActiveStep(reviewStatus.status) : -1
+  const isAIProcessing = reviewStatus && ['analysing','in_review','submitted'].includes(reviewStatus.status)
+
   if (loading && !reviewStatus) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading review status...</p>
         </div>
       </div>
@@ -163,7 +193,7 @@ export default function ReviewStatus() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <Card className="max-w-md w-full mx-4">
           <CardHeader>
             <CardTitle className="text-red-600">Error</CardTitle>
@@ -180,7 +210,7 @@ export default function ReviewStatus() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-100">
       {/* Header */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-4 py-4">
@@ -199,6 +229,61 @@ export default function ReviewStatus() {
           </div>
         </div>
       </div>
+
+      {/* Pipeline Progress */}
+      {reviewStatus && (
+        <div className="bg-slate-900 border-b border-slate-800">
+          <div className="max-w-7xl mx-auto px-4 py-5">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">
+              8-Step Automated Pipeline · 3 Human Governance Gates
+            </p>
+            <div className="flex items-start gap-0 overflow-x-auto pb-1">
+              {PIPELINE_STEPS.map((step, idx) => {
+                const completed = isTerminal(reviewStatus.status)
+                  ? true
+                  : idx < activeStep
+                const active    = !isTerminal(reviewStatus.status) && idx === activeStep
+                const isAIRange = isAIProcessing && idx >= 2 && idx <= 4
+                const isGate    = idx === 0 || idx === 6 || idx === 7
+
+                return (
+                  <div key={step.label} className="flex items-center flex-shrink-0">
+                    <div className="flex flex-col items-center" style={{ minWidth: '72px' }}>
+                      {/* Circle */}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
+                        completed
+                          ? 'bg-teal-600 border-teal-600 text-white'
+                          : active || isAIRange
+                          ? 'bg-teal-600/20 border-teal-400 text-teal-400 animate-pulse'
+                          : 'bg-slate-800 border-slate-600 text-slate-500'
+                      }`}>
+                        {completed ? '✓' : idx + 1}
+                      </div>
+                      {/* Gate marker */}
+                      {isGate && (
+                        <span className="text-[9px] font-semibold text-amber-400 mt-0.5">GATE</span>
+                      )}
+                      {/* Labels */}
+                      <p className={`text-[11px] font-semibold mt-1 text-center leading-tight ${
+                        completed || active || isAIRange ? 'text-white' : 'text-slate-500'
+                      }`}>{step.label}</p>
+                      <p className="text-[10px] text-slate-500 text-center leading-tight">{step.sublabel}</p>
+                    </div>
+                    {/* Connector */}
+                    {idx < PIPELINE_STEPS.length - 1 && (
+                      <div className={`h-0.5 flex-shrink-0 mx-1 transition-all ${
+                        idx < activeStep || isTerminal(reviewStatus.status)
+                          ? 'bg-teal-600'
+                          : 'bg-slate-700'
+                      }`} style={{ width: '20px' }} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-4 py-8">
         {reviewStatus && (
