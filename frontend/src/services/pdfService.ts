@@ -44,6 +44,12 @@ interface DomainSummary {
   actions: any[]
   adrs: any[]
   recommendations: any[]
+  executive_summary?: string
+  overall_readiness?: string
+  compliant_areas?: string[]
+  gap_areas?: string[]
+  evidence_quality?: string
+  domain_specific_scores?: Record<string, number | { rag_score?: number }>
 }
 
 const DOMAIN_LABELS: Record<string, string> = {
@@ -358,18 +364,100 @@ export async function generateARBReportPDF(review: ReviewData): Promise<void> {
     )
     y += 20
 
-    // Domain summary paragraph
-    const aiDomainSummary = review.report_json?.ai_review?.domain_summaries?.[slug]?.summary
+    // Executive summary — prefer domain_summaries field, fall back to report_json paths
+    const execSummary = summary.executive_summary
+      || review.report_json?.ai_review?.domain_summaries?.[slug]?.summary
       || review.report_json?.ai_review?.summaries?.[slug]
       || ''
-    if (aiDomainSummary) {
+    if (execSummary) {
       y = ensureSpace(doc, y, 15, 20)
+      y = addSubsectionHeader(doc, 'Executive Summary', y, margin)
       doc.setTextColor(55, 65, 81)
       doc.setFontSize(9)
       doc.setFont('helvetica', 'normal')
-      const lines = doc.splitTextToSize(aiDomainSummary, contentWidth)
+      const lines = doc.splitTextToSize(execSummary, contentWidth)
       doc.text(lines, margin, y)
-      y += lines.length * 5 + 6
+      y += lines.length * 4.5 + 4
+    }
+
+    // Evidence quality + overall readiness metadata — inline, no extra ensureSpace
+    const metaItems: string[] = []
+    if (summary.evidence_quality) metaItems.push(`Evidence Quality: ${summary.evidence_quality}`)
+    if (summary.overall_readiness) metaItems.push(`Overall Readiness: ${summary.overall_readiness}`)
+    if (metaItems.length > 0) {
+      doc.setFontSize(8)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(100, 116, 139)
+      doc.text(metaItems.join('   |   '), margin, y)
+      y += 7
+    }
+
+    // Compliant areas and gap areas
+    const compliantAreas = summary.compliant_areas || []
+    const gapAreas = summary.gap_areas || []
+    if (compliantAreas.length > 0 || gapAreas.length > 0) {
+      y = ensureSpace(doc, y, 20, 20)
+      const colW = (contentWidth - 2) / 2
+      const areaRows: string[][] = []
+      const maxRows = Math.max(compliantAreas.length, gapAreas.length)
+      for (let ri = 0; ri < maxRows; ri++) {
+        areaRows.push([
+          compliantAreas[ri] || '',
+          gapAreas[ri] || '',
+        ])
+      }
+      autoTable(doc, {
+        startY: y,
+        head: [['Compliant Areas', 'Gap Areas']],
+        body: areaRows,
+        theme: 'grid',
+        headStyles: {
+          fontSize: 8,
+          fontStyle: 'bold',
+          fillColor: [240, 253, 244],
+          textColor: [21, 128, 61],
+        },
+        bodyStyles: { fontSize: 8, overflow: 'linebreak' },
+        columnStyles: {
+          0: { cellWidth: colW, textColor: [21, 128, 61] },
+          1: { cellWidth: colW, textColor: [180, 83, 9] },
+        },
+        styles: { cellPadding: 2.5, lineColor: [200, 200, 200], lineWidth: 0.2 },
+        didParseCell: (data) => {
+          if (data.section === 'head' && data.column.index === 1) {
+            data.cell.styles.fillColor = [255, 251, 235]
+            data.cell.styles.textColor = [180, 83, 9]
+          }
+        },
+      })
+      y = (doc.lastAutoTable?.finalY || y) + 8
+    }
+
+    // Domain-specific sub-scores
+    const subScores = summary.domain_specific_scores
+    if (subScores && Object.keys(subScores).length > 0) {
+      y = ensureSpace(doc, y, 20, 20)
+      y = addSubsectionHeader(doc, 'Sub-scores', y, margin)
+      const subRows = Object.entries(subScores).map(([key, val]) => {
+        const score = typeof val === 'number' ? val : ((val as any)?.rag_score ?? 3)
+        const label = score <= 2 ? 'RED' : score === 3 ? 'AMBER' : 'GREEN'
+        return [key.replace(/_/g, ' '), `${score}/5`, label]
+      })
+      autoTable(doc, {
+        startY: y,
+        head: [['Sub-area', 'Score', 'RAG']],
+        body: subRows,
+        theme: 'grid',
+        headStyles: { fillColor: [100, 116, 139], textColor: [255, 255, 255], fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 'auto' },
+          1: { cellWidth: 22, halign: 'center' },
+          2: { cellWidth: 22, halign: 'center' },
+        },
+        styles: { cellPadding: 2.5, lineColor: [200, 200, 200], lineWidth: 0.2 },
+      })
+      y = (doc.lastAutoTable?.finalY || y) + 8
     }
 
     // Key Recommendations

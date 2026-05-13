@@ -53,7 +53,7 @@ export default function LoginPage() {
             <p className="font-bold text-white text-base leading-tight">
               ARB <span className="text-teal-400">AI</span> Agent
             </p>
-            <p className="text-xs text-slate-400">by Future Focus IT Solutions</p>
+            <p className="text-xs text-slate-400">Architecture Review Board</p>
           </div>
         </div>
 
@@ -168,7 +168,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-xs text-slate-400 text-center mt-8">
-            Future Focus IT Solutions · Enterprise AI Products
+            Enterprise AI Products
           </p>
         </div>
       </div>
