@@ -31,6 +31,7 @@ export interface SynthesisInput {
   allActions:        any[]
   aggregateScore:    number
   model:             string
+  supabase?:         any  // SupabaseClient — optional for DB-managed prompt lookup
 }
 
 export interface SynthesisResult {
@@ -236,15 +237,38 @@ function buildFallbackResult(input: SynthesisInput, reason: string): SynthesisRe
   }
 }
 
+// ── DB-managed prompt lookup ──────────────────────────────────────────────────
+
+async function getDbSynthesisPrompt(supabase: any): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('prompt_templates')
+      .select('content')
+      .eq('prompt_key', 'synthesizer.system')
+      .eq('is_active', true)
+      .order('version', { ascending: false })
+      .limit(1)
+      .single()
+    if (data?.content) return data.content
+  } catch {
+    // Fall through to hardcoded constant
+  }
+  return null
+}
+
 // ── Main entry point ──────────────────────────────────────────────────────────
 
 export async function runSynthesis(input: SynthesisInput): Promise<SynthesisResult> {
   let raw: string
   let tokensUsed = 0
 
+  const systemPrompt = input.supabase
+    ? (await getDbSynthesisPrompt(input.supabase)) ?? SYNTHESIS_SYSTEM_PROMPT
+    : SYNTHESIS_SYSTEM_PROMPT
+
   try {
     const llmResult = await callLLM({
-      systemPrompt: SYNTHESIS_SYSTEM_PROMPT,
+      systemPrompt,
       userPrompt:   buildSynthesisPrompt(input),
       model:        input.model,
     })

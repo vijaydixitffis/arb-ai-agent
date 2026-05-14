@@ -1,18 +1,34 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
-import { LayoutDashboard, FileText, ClipboardCheck, Settings, LogOut, User } from 'lucide-react'
+import { isAdmin, isSuperAdmin } from '../../types/admin'
+import {
+  LayoutDashboard, FileText, ClipboardCheck, LogOut, User,
+  Shield, Users, Globe, ListChecks, BarChart3, ScrollText, BookOpen, SlidersHorizontal,
+} from 'lucide-react'
 
-const menuItems = [
+const mainMenuItems = [
   { icon: LayoutDashboard, label: 'Dashboard',      path: '/dashboard',  roles: ['solution_architect', 'enterprise_architect', 'arb_admin'] },
   { icon: FileText,        label: 'My Submissions', path: '/submissions', roles: ['solution_architect'] },
   { icon: ClipboardCheck,  label: 'Reviews',        path: '/reviews',    roles: ['enterprise_architect', 'arb_admin'] },
-  { icon: Settings,        label: 'Settings',       path: '/settings',   roles: ['solution_architect', 'enterprise_architect', 'arb_admin'] },
+]
+
+const adminMenuItems = [
+  { icon: Shield,            label: 'Admin Home',    path: '/admin',             roles: ['arb_admin', 'super_admin'] },
+  { icon: Users,             label: 'Users',         path: '/admin/users',       roles: ['arb_admin', 'super_admin'] },
+  { icon: SlidersHorizontal, label: 'System Config', path: '/admin/config',      roles: ['super_admin'] },
+  { icon: Globe,             label: 'Domains',       path: '/admin/domains',     roles: ['arb_admin', 'super_admin'] },
+  { icon: ListChecks,        label: 'Checklist',     path: '/admin/checklist',   roles: ['arb_admin', 'super_admin'] },
+  { icon: BarChart3,         label: 'Analytics',     path: '/admin/analytics',   roles: ['arb_admin', 'super_admin'] },
+  { icon: ScrollText,        label: 'Audit Log',     path: '/admin/audit-log',   roles: ['arb_admin', 'super_admin'] },
+  { icon: FileText,          label: 'Prompts',       path: '/admin/prompts',     roles: ['super_admin'] },
+  { icon: BookOpen,          label: 'Knowledge Base',path: '/admin/kb',          roles: ['super_admin'] },
 ]
 
 const roleLabel: Record<string, string> = {
   solution_architect:   'Solution Architect',
   enterprise_architect: 'Enterprise Architect',
   arb_admin:            'ARB Administrator',
+  super_admin:          'Super Admin',
 }
 
 export default function Sidebar() {
@@ -26,9 +42,30 @@ export default function Sidebar() {
     navigate('/login')
   }
 
-  const filteredMenuItems = menuItems.filter(item =>
-    item.roles.includes(user?.role || '')
-  )
+  const role = user?.role ?? ''
+  const filteredMain = mainMenuItems.filter(item => item.roles.includes(role))
+  const filteredAdmin = adminMenuItems.filter(item => item.roles.includes(role))
+  const showAdmin = isAdmin(role)
+
+  const NavItem = ({ icon: Icon, label, path }: { icon: any; label: string; path: string }) => {
+    const active = location.pathname === path || (path !== '/admin' && location.pathname.startsWith(path))
+    return (
+      <li>
+        <button
+          onClick={() => navigate(path)}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+            active
+              ? 'bg-teal-500/15 text-teal-400 font-medium'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Icon className="w-4 h-4 flex-shrink-0" />
+          <span>{label}</span>
+          {active && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-teal-400" />}
+        </button>
+      </li>
+    )
+  }
 
   return (
     <aside className="w-64 bg-slate-900 flex flex-col h-screen flex-shrink-0">
@@ -50,31 +87,27 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest px-3 mb-2">Navigation</p>
-        <ul className="space-y-0.5">
-          {filteredMenuItems.map((item) => {
-            const Icon = item.icon
-            const isActive = location.pathname === item.path
-            return (
-              <li key={item.path}>
-                <button
-                  onClick={() => navigate(item.path)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                    isActive
-                      ? 'bg-teal-500/15 text-teal-400 font-medium'
-                      : 'text-slate-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 flex-shrink-0" />
-                  <span>{item.label}</span>
-                  {isActive && (
-                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-teal-400" />
-                  )}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+        {filteredMain.length > 0 && (
+          <>
+            {!isSuperAdmin(role) && (
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest px-3 mb-2">Navigation</p>
+            )}
+            <ul className="space-y-0.5">
+              {filteredMain.map(item => <NavItem key={item.path} {...item} />)}
+            </ul>
+          </>
+        )}
+
+        {showAdmin && (
+          <>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest px-3 mt-5 mb-2">
+              {isSuperAdmin(role) ? 'Super Admin' : 'Administration'}
+            </p>
+            <ul className="space-y-0.5">
+              {filteredAdmin.map(item => <NavItem key={item.path} {...item} />)}
+            </ul>
+          </>
+        )}
       </nav>
 
       {/* User Profile */}

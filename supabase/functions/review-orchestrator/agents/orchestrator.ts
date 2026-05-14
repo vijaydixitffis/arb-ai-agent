@@ -207,6 +207,7 @@ export class OrchestratorAgent {
       allActions,
       aggregateScore,
       model:          synthesisModel,
+      supabase,
     })
     totalTokensUsed += synthesisResult.tokensUsed
 
@@ -327,6 +328,31 @@ export class OrchestratorAgent {
   }
 
   // ── System prompt (spec: role + rules + scoring) ──────────────────────────
+
+  private async _getDbSystemPrompt(supabase: any, domainLabel: string, agentDomain: string): Promise<string | null> {
+    // Check domain-specific key first, then generic fallback
+    const keys = agentDomain ? [`domain.system.${agentDomain}`, 'domain.system'] : ['domain.system']
+    for (const key of keys) {
+      try {
+        const { data } = await supabase
+          .from('prompt_templates')
+          .select('content')
+          .eq('prompt_key', key)
+          .eq('is_active', true)
+          .order('version', { ascending: false })
+          .limit(1)
+          .single()
+        if (data?.content) {
+          return data.content
+            .replace(/\{domain_label\}/g, domainLabel)
+            .replace(/\{domain_slug\}/g, agentDomain)
+        }
+      } catch {
+        // key not found — try next
+      }
+    }
+    return null
+  }
 
   private buildDomainSystemPrompt(domainLabel: string, agentDomain: string = ''): string {
     const solutionExtra = agentDomain === 'solution' ? `
@@ -867,8 +893,9 @@ Include "project_context" as the first key (Solution domain only):
         const kbGenLimit = Math.max(1, Math.floor(4 * contentScale))
         const kbContext = await getKnowledgeBaseContent(supabase, kbCategories, undefined, kbDomLimit + kbGenLimit)
 
-        // 6. Build prompts per spec structure
-        const systemPrompt = this.buildDomainSystemPrompt(domainLabel, agentDomain)
+        // 6. Build prompts — DB-managed prompt takes precedence if a super_admin has configured one
+        const dbPrompt = await this._getDbSystemPrompt(supabase, domainLabel, agentDomain)
+        const systemPrompt = dbPrompt ?? this.buildDomainSystemPrompt(domainLabel, agentDomain)
         const userPrompt = this.buildDomainUserPrompt({
           sessionId: review.id,
           reportJson,

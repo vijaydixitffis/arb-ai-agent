@@ -7,6 +7,7 @@ class UserRole(str, Enum):
     SOLUTION_ARCHITECT = "solution_architect"
     ENTERPRISE_ARCHITECT = "enterprise_architect"
     ARB_ADMIN = "arb_admin"
+    SUPER_ADMIN = "super_admin"
 
 class User(BaseModel):
     id: str

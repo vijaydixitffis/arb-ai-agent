@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login } from '../stores/authStore'
+import { login, useAuthStore } from '../stores/authStore'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
@@ -30,7 +30,8 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await login(email, password)
-      navigate('/dashboard')
+      const role = useAuthStore.getState().user?.role
+      navigate(role === 'super_admin' ? '/admin' : '/dashboard')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.')
     } finally {

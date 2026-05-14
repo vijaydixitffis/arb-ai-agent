@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore, initializeSession } from './stores/authStore'
+import { isAdmin, isSuperAdmin } from './types/admin'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
 import ARBSubmission from './pages/ARBSubmission'
@@ -8,6 +9,15 @@ import EARRSubmission from './pages/EARRSubmission'
 import ReviewDashboard from './pages/ReviewDashboard'
 import ReviewStatus from './pages/ReviewStatus'
 import Layout from './components/layout/Layout'
+import AdminDashboard from './pages/Admin/AdminDashboard'
+import UserManagement from './pages/Admin/UserManagement'
+import ConfigSettings from './pages/Admin/ConfigSettings'
+import DomainManagement from './pages/Admin/DomainManagement'
+import ChecklistEditor from './pages/Admin/ChecklistEditor'
+import Analytics from './pages/Admin/Analytics'
+import AuditLog from './pages/Admin/AuditLog'
+import PromptManagement from './pages/Admin/PromptManagement'
+import KnowledgeBase from './pages/Admin/KnowledgeBase'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isInitializing } = useAuthStore()
@@ -24,6 +34,26 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />
   }
 
+  return <>{children}</>
+}
+
+function RootRedirect() {
+  const { user } = useAuthStore()
+  if (user?.role === 'super_admin') return <Navigate to="/admin" replace />
+  return <Navigate to="/dashboard" replace />
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isInitializing } = useAuthStore()
+  if (isInitializing) return null
+  if (!user || !isAdmin(user.role)) return <Navigate to="/dashboard" replace />
+  return <>{children}</>
+}
+
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isInitializing } = useAuthStore()
+  if (isInitializing) return null
+  if (!user || !isSuperAdmin(user.role)) return <Navigate to="/admin" replace />
   return <>{children}</>
 }
 
@@ -75,7 +105,7 @@ function App() {
             <Layout />
           </ProtectedRoute>
         }>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<RootRedirect />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="submissions" element={<Dashboard />} />
           <Route path="reviews" element={<Dashboard />} />
@@ -101,6 +131,19 @@ function App() {
             </ProtectedRoute>
           } />
           <Route path="review-status/:reviewId" element={<ReviewStatus />} />
+
+          {/* Admin routes — arb_admin + super_admin */}
+          <Route path="admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+          <Route path="admin/users" element={<AdminRoute><UserManagement /></AdminRoute>} />
+          <Route path="admin/config" element={<SuperAdminRoute><ConfigSettings /></SuperAdminRoute>} />
+          <Route path="admin/domains" element={<AdminRoute><DomainManagement /></AdminRoute>} />
+          <Route path="admin/checklist" element={<AdminRoute><ChecklistEditor /></AdminRoute>} />
+          <Route path="admin/analytics" element={<AdminRoute><Analytics /></AdminRoute>} />
+          <Route path="admin/audit-log" element={<AdminRoute><AuditLog /></AdminRoute>} />
+
+          {/* Super-admin only routes */}
+          <Route path="admin/prompts" element={<SuperAdminRoute><PromptManagement /></SuperAdminRoute>} />
+          <Route path="admin/kb" element={<SuperAdminRoute><KnowledgeBase /></SuperAdminRoute>} />
         </Route>
       </Routes>
     </BrowserRouter>

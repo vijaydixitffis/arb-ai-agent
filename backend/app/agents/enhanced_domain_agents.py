@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 from app.services.llm_service import llm_service, LLMService
 from app.services.artefact_service import ArtefactService
 from app.db.review_models import AuditLog, Review
+from app.core.config import settings
+from app.core.db_config import db_config
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +112,9 @@ class EnhancedDomainValidationAgent:
         domain_code  = DOMAIN_CODE.get(domain_slug, domain_slug.upper()[:3])
         domain_label = DOMAIN_LABEL.get(domain_slug, domain_slug.title())
 
-        chunk_limit  = max(1, int(15 * content_scale))
-        kb_dom_limit = max(1, int(8  * content_scale))
-        kb_gen_limit = max(1, int(4  * content_scale))
+        chunk_limit  = max(1, int(db_config(self.db, "agent.kb_chunk_limit",      settings.KB_CHUNK_LIMIT)      * content_scale))
+        kb_dom_limit = max(1, int(db_config(self.db, "agent.kb_max_results",       settings.KB_DOMAIN_RESULTS)   * content_scale))
+        kb_gen_limit = max(1, int(db_config(self.db, "agent.kb_max_results_general", settings.KB_GENERAL_RESULTS) * content_scale))
 
         # 1. Artefact chunks
         chunks = await self.artefact_service.get_relevant_chunks(
@@ -159,9 +161,10 @@ class EnhancedDomainValidationAgent:
             response = await self.llm_service.generate_completion(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
-                temperature=0.5,
-                max_tokens=16384,
+                temperature=db_config(self.db, "agent.domain_temperature", settings.DOMAIN_LLM_TEMPERATURE),
+                max_tokens=int(db_config(self.db, "agent.domain_max_tokens", settings.DOMAIN_LLM_MAX_TOKENS)),
                 timeout=120,
+                db=self.db,
             )
         except Exception as llm_exc:
             self._audit_llm(
@@ -293,6 +296,22 @@ class EnhancedDomainValidationAgent:
     # ── System prompt (spec §RULES + SCORING RULES) ───────────────────────────
 
     def _build_system_prompt(self, domain_label: str, domain_slug: str = "") -> str:
+        # Domain-specific key first, then generic fallback, then hardcoded constant.
+        try:
+            from app.db.admin_models import PromptTemplate
+            keys = [f"domain.system.{domain_slug}", "domain.system"] if domain_slug else ["domain.system"]
+            for key in keys:
+                db_prompt = (
+                    self.db.query(PromptTemplate)
+                    .filter(PromptTemplate.prompt_key == key, PromptTemplate.is_active == True)
+                    .order_by(PromptTemplate.version.desc())
+                    .first()
+                )
+                if db_prompt and db_prompt.content:
+                    return db_prompt.content.format(domain_label=domain_label, domain_slug=domain_slug)
+        except Exception:
+            pass
+
         return f"""You are a senior {domain_label} architect acting as a specialist reviewer in the Pre-ARB AI Agent pipeline.
 Your role is to conduct a thorough, proportionate review of the Solution Architect's submission against
 enterprise architecture standards — producing a balanced assessment that reflects real-world ARB practice.

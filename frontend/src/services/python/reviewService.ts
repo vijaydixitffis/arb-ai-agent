@@ -218,9 +218,15 @@ export const reviewService = {
           const status = await this.getReviewStatus(reviewId)
           onUpdate(status)
           
-          // If review is complete, resolve
-          if (status.status === 'approved' || status.status === 'rejected' || 
-              status.status === 'deferred') {
+          // Stop polling once the agent has finished (success, partial, or failed)
+          // or a governance decision has been recorded.
+          const terminalStates = [
+            'review_ready', 'agent_failed',
+            'ea_reviewing', 'ea_review',
+            'approved', 'conditionally_approved',
+            'rejected', 'deferred', 'closed',
+          ]
+          if (terminalStates.includes(status.status)) {
             resolve(status)
             return
           }

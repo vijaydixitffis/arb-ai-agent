@@ -28,7 +28,29 @@ class Settings(BaseSettings):
 
     # Mock LLM — when true, bypasses all LLM calls and uses the Bank EDMS fixture
     USE_MOCK_LLM: bool = False
-    
+
+    # LLM call parameters — synthesis step
+    LLM_TEMPERATURE: float = 0.3
+    LLM_MAX_TOKENS: int = 4096
+
+    # LLM call parameters — domain agents
+    DOMAIN_LLM_TEMPERATURE: float = 0.5
+    DOMAIN_LLM_MAX_TOKENS: int = 16384
+
+    # Agent retry behaviour
+    AGENT_MAX_RETRIES: int = 2           # total attempts (1 initial + N-1 retries)
+    AGENT_RETRY_DELAY_S: float = 10.0   # seconds between retry attempts
+
+    # Agent pacing
+    INTER_DOMAIN_DELAY_S: float = 0.5   # seconds between sequential domain calls
+
+    # KB retrieval limits (base values, scaled by content_scale at runtime)
+    KB_CHUNK_LIMIT: int = 15
+    KB_DOMAIN_RESULTS: int = 8
+    KB_GENERAL_RESULTS: int = 4
+    KB_CONTENT_SCALE: float = 1.0       # default content scale passed to domain agent
+    CONTENT_SCALE_ON_RETRY: float = 0.75  # content scale applied on retry attempt
+
     # PostgreSQL Configuration
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/arb_ai_agent"
     

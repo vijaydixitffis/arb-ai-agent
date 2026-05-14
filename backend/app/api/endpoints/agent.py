@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.core.config import settings
+from app.core.db_config import db_config
 from app.agents.enhanced_orchestrator import EnhancedARBOrchestrator
 from app.agents.enhanced_domain_agents import _rag_score_to_severity
 
@@ -91,6 +92,27 @@ def _arr(v: Any) -> Optional[List[str]]:
     return None
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _mark_agent_failed(db: Session, review_id: str, error_msg: str) -> None:
+    """Persist agent_failed status so SA/EA can see and re-trigger the review."""
+    from app.db.review_models import Review
+    try:
+        review = db.query(Review).filter(Review.id == review_id).first()
+        if review:
+            review.status = "agent_failed"
+            existing = review.report_json or {}
+            review.report_json = {**existing, "agent_error": error_msg}
+            db.commit()
+            logger.info(f"[AGENT] Marked review {review_id} as agent_failed")
+    except Exception as e:
+        logger.error(f"[AGENT] Could not persist agent_failed for {review_id}: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/review")
@@ -107,10 +129,28 @@ async def trigger_review(
     if not review_id:
         raise HTTPException(status_code=400, detail="reviewId is required")
 
-    logger.info(f"[AGENT] trigger_review review_id={review_id} user={current_user} mock={settings.USE_MOCK_LLM}")
+    # Gate: block re-trigger on truly final governance decisions.
+    # agent_failed and review_ready (with domain errors) are explicitly allowed.
+    from app.db.review_models import Review as ReviewModel
+    review_row = db.query(ReviewModel).filter(ReviewModel.id == review_id).first()
+    if not review_row:
+        raise HTTPException(status_code=404, detail="Review not found")
+    _BLOCKED_STATUSES = {"approved", "conditionally_approved", "rejected", "closed"}
+    if review_row.status in _BLOCKED_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot re-trigger a review with status '{review_row.status}'",
+        )
+
+    is_retrigger = review_row.status in {"agent_failed", "review_ready"}
+    use_mock = db_config(db, "llm.use_mock", settings.USE_MOCK_LLM)
+    logger.info(
+        f"[AGENT] trigger_review review_id={review_id} user={current_user} "
+        f"status={review_row.status} retrigger={is_retrigger} mock={use_mock}"
+    )
 
     try:
-        if settings.USE_MOCK_LLM:
+        if use_mock:
             from app.agents.mock_llm_populator import load_mock_result
             logger.info("[AGENT] USE_MOCK_LLM=true — skipping LLM calls, loading Bank EDMS fixture")
             result = await load_mock_result(review_id, db)
@@ -122,23 +162,39 @@ async def trigger_review(
             )
     except Exception as exc:
         logger.exception(f"[AGENT] Orchestration failed for {review_id}")
+        _mark_agent_failed(db, review_id, str(exc))
         raise HTTPException(status_code=500, detail=f"Review orchestration failed: {exc}")
+
+    # Detect partial domain failures — domains that exhausted retries get a
+    # synthetic error payload.  Flag them so the frontend can offer re-trigger.
+    failed_domains = [
+        p.get("domain", p.get("domain_slug", "unknown"))
+        for p in result.get("domain_payloads", [])
+        if p.get("error")
+    ]
+    if failed_domains:
+        result["has_domain_errors"] = True
+        result["failed_domains"]    = failed_domains
+        logger.warning(f"[AGENT] review {review_id} has domain errors: {failed_domains}")
 
     try:
         _persist_results(db, review_id, result)
     except Exception as exc:
         logger.error(f"[AGENT] Persistence error for {review_id}: {exc}", exc_info=True)
+        _mark_agent_failed(db, review_id, f"persistence error: {exc}")
         try:
             db.rollback()
         except Exception:
             pass
 
     return {
-        "success":    True,
-        "reviewId":   review_id,
-        "decision":   result.get("decision"),
-        "report":     result,
-        "tokensUsed": result.get("total_tokens_used", 0),
+        "success":           True,
+        "reviewId":          review_id,
+        "decision":          result.get("decision"),
+        "report":            result,
+        "tokensUsed":        result.get("total_tokens_used", 0),
+        "hasDomainErrors":   bool(failed_domains),
+        "failedDomains":     failed_domains,
     }
 
 

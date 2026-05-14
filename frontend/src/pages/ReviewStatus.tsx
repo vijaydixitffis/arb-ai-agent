@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { reviewService, ReviewStatus as ReviewStatusType } from '../services/backendConfig'
-import { ArrowLeft, CheckCircle, XCircle, Clock, AlertCircle, FileText, Target, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, CheckCircle, XCircle, Clock, AlertCircle, FileText, Target, AlertTriangle, RefreshCw } from 'lucide-react'
 
 export default function ReviewStatus() {
   const { reviewId } = useParams<{ reviewId: string }>()
@@ -12,6 +12,8 @@ export default function ReviewStatus() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [polling, setPolling] = useState(false)
+  const [retriggering, setRetriggering] = useState(false)
+  const [retriggerError, setRetriggerError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!reviewId) {
@@ -59,6 +61,20 @@ export default function ReviewStatus() {
     }
   }
 
+  const handleRetrigger = async () => {
+    if (!reviewId) return
+    setRetriggering(true)
+    setRetriggerError(null)
+    try {
+      await reviewService.triggerReviewOrchestrator(reviewId)
+      await fetchReviewStatus()
+    } catch (err) {
+      setRetriggerError(err instanceof Error ? err.message : 'Re-trigger failed')
+    } finally {
+      setRetriggering(false)
+    }
+  }
+
   const getStatusIcon = () => {
     if (!reviewStatus) return <Clock className="w-8 h-8 text-gray-400" />
     
@@ -81,6 +97,8 @@ export default function ReviewStatus() {
       case 'returned':
       case 'rework':
         return <AlertCircle className="w-8 h-8 text-amber-500" />
+      case 'agent_failed':
+        return <XCircle className="w-8 h-8 text-red-500" />
       case 'rejected':
         return <XCircle className="w-8 h-8 text-red-600" />
       case 'deferred':
@@ -116,6 +134,8 @@ export default function ReviewStatus() {
       case 'returned':
       case 'rework':
         return 'Returned — SA rework required'
+      case 'agent_failed':
+        return 'AI Review Failed — re-trigger to retry'
       case 'rejected':
         return 'Rejected'
       case 'deferred':
@@ -166,6 +186,7 @@ export default function ReviewStatus() {
       case 'drafting':                                       return 0
       case 'queued': case 'pending':                        return 1
       case 'submitted': case 'analysing': case 'in_review': return 3
+      case 'agent_failed':                                  return 3
       case 'review_ready':                                  return 5
       case 'ea_reviewing': case 'ea_review': case 'returned': return 6
       case 'approved': case 'conditionally_approved':
@@ -177,8 +198,12 @@ export default function ReviewStatus() {
   const isTerminal = (status: string) =>
     ['approved','conditionally_approved','rejected','deferred','closed'].includes(status)
 
-  const activeStep    = reviewStatus ? getActiveStep(reviewStatus.status) : -1
+  const activeStep     = reviewStatus ? getActiveStep(reviewStatus.status) : -1
   const isAIProcessing = reviewStatus && ['analysing','in_review','submitted'].includes(reviewStatus.status)
+  const hasDomainErrors = reviewStatus?.report_json?.has_domain_errors === true
+  const failedDomains: string[] = reviewStatus?.report_json?.failed_domains ?? []
+  const showRetrigger  = reviewStatus &&
+    (reviewStatus.status === 'agent_failed' || (reviewStatus.status === 'review_ready' && hasDomainErrors))
 
   if (loading && !reviewStatus) {
     return (
@@ -288,6 +313,76 @@ export default function ReviewStatus() {
       <main className="max-w-7xl mx-auto px-4 py-8">
         {reviewStatus && (
           <div className="space-y-6">
+            {/* Re-trigger Banner */}
+            {showRetrigger && (
+              <div className={`rounded-lg border p-4 ${
+                reviewStatus.status === 'agent_failed'
+                  ? 'bg-red-50 border-red-300'
+                  : 'bg-amber-50 border-amber-300'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {reviewStatus.status === 'agent_failed' ? (
+                    <XCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {reviewStatus.status === 'agent_failed' ? (
+                      <>
+                        <p className="font-semibold text-red-800">AI Review Failed</p>
+                        {reviewStatus.report_json?.agent_error && (
+                          <p className="text-sm text-red-700 mt-1 font-mono break-words">
+                            {reviewStatus.report_json.agent_error}
+                          </p>
+                        )}
+                        <p className="text-sm text-red-700 mt-1">
+                          The review agent encountered a critical error. Re-triggering will restart the full analysis.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-amber-800">Partial Review — Some Domains Failed</p>
+                        {failedDomains.length > 0 && (
+                          <p className="text-sm text-amber-700 mt-1">
+                            Failed domains:{' '}
+                            {failedDomains.map((d, i) => (
+                              <span key={d}>
+                                <span className="font-mono font-medium capitalize">{d}</span>
+                                {i < failedDomains.length - 1 ? ', ' : ''}
+                              </span>
+                            ))}
+                          </p>
+                        )}
+                        <p className="text-sm text-amber-700 mt-1">
+                          The review is available but one or more domains could not be fully analysed. Re-triggering will re-run the complete analysis.
+                        </p>
+                      </>
+                    )}
+                    {retriggerError && (
+                      <p className="text-sm text-red-600 mt-2 font-medium">{retriggerError}</p>
+                    )}
+                  </div>
+                  <Button
+                    onClick={handleRetrigger}
+                    disabled={retriggering}
+                    size="sm"
+                    className={`flex-shrink-0 flex items-center gap-2 ${
+                      reviewStatus.status === 'agent_failed'
+                        ? 'bg-red-600 hover:bg-red-700 text-white'
+                        : 'bg-amber-600 hover:bg-amber-700 text-white'
+                    }`}
+                  >
+                    <RefreshCw className={`w-4 h-4 ${retriggering ? 'animate-spin' : ''}`} />
+                    {retriggering
+                      ? 'Re-triggering...'
+                      : reviewStatus.status === 'agent_failed'
+                      ? 'Re-trigger AI Review'
+                      : 'Re-run Analysis'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {/* Status Card */}
             <Card>
               <CardHeader>

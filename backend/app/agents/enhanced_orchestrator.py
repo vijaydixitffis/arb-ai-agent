@@ -24,15 +24,10 @@ from app.agents.enhanced_domain_agents import EnhancedDomainValidationAgent, _ra
 from app.services.artefact_service import ArtefactService
 from app.db.review_models import Review
 from app.db.metadata_models import ChecklistQuestion
+from app.core.config import settings
+from app.core.db_config import db_config
 
 logger = logging.getLogger(__name__)
-
-# Delay between sequential domain LLM calls — stays within 15 RPM free-tier limit.
-INTER_DOMAIN_DELAY_S = 0.5
-
-# One retry on transient LLM errors (503, timeout, etc.), 10 s delay.
-# Retry (attempt 2) reduces KB + artefact content by 25% to stay under token limits.
-LLM_CONTENT_SCALE_ON_SECOND_RETRY = 0.75
 
 
 class EnhancedARBOrchestrator:
@@ -106,7 +101,7 @@ class EnhancedARBOrchestrator:
                 })
 
             if domain_slug != domains[-1]:
-                await asyncio.sleep(INTER_DOMAIN_DELAY_S)
+                await asyncio.sleep(db_config(self.db, "agent.domain_delay_seconds", settings.INTER_DOMAIN_DELAY_S))
 
         # ── Aggregate ─────────────────────────────────────────────────────────
         domain_scores: Dict[str, int] = {}
@@ -524,6 +519,22 @@ YOUR SIX RESPONSIBILITIES:
 
 Respond ONLY with a valid JSON object. No preamble, no markdown outside the JSON."""
 
+    def _get_synthesis_system_prompt(self) -> str:
+        """Return synthesizer.system from DB if configured, otherwise the hardcoded constant."""
+        try:
+            from app.db.admin_models import PromptTemplate
+            db_prompt = (
+                self.db.query(PromptTemplate)
+                .filter(PromptTemplate.prompt_key == "synthesizer.system", PromptTemplate.is_active == True)
+                .order_by(PromptTemplate.version.desc())
+                .first()
+            )
+            if db_prompt and db_prompt.content:
+                return db_prompt.content
+        except Exception:
+            pass
+        return self._SYNTHESIS_SYSTEM_PROMPT
+
     async def _run_synthesis(
         self,
         review_id: str,
@@ -639,10 +650,11 @@ aggregate_score: {aggregate_score}
         try:
             response = await self.domain_agent.llm_service.generate_completion(
                 prompt=user_prompt,
-                system_prompt=self._SYNTHESIS_SYSTEM_PROMPT,
-                temperature=0.3,
-                max_tokens=4096,
+                system_prompt=self._get_synthesis_system_prompt(),
+                temperature=db_config(self.db, "llm.temperature", settings.LLM_TEMPERATURE),
+                max_tokens=int(db_config(self.db, "llm.max_tokens", settings.LLM_MAX_TOKENS)),
                 timeout=60,
+                db=self.db,
             )
         except Exception as exc:
             logger.warning(f"[SYNTHESIS] LLM call failed ({exc}) — using fallback")
@@ -759,7 +771,10 @@ aggregate_score: {aggregate_score}
         Attempt 2 (retry, 10 s) — KB + artefact content reduced by 25 %
                                  to stay within LLM token limits.
         """
-        delays = [0, 10]  # 2 total attempts
+        max_attempts  = int(db_config(self.db, "agent.max_retries",          settings.AGENT_MAX_RETRIES))
+        retry_delay   = float(db_config(self.db, "agent.retry_delay_seconds",  settings.AGENT_RETRY_DELAY_S))
+        scale_on_retry = float(db_config(self.db, "agent.content_scale_on_retry", settings.CONTENT_SCALE_ON_RETRY))
+        delays = [0] + [retry_delay] * (max_attempts - 1)
         last_exc: Exception = RuntimeError("no attempts made")
         for attempt, delay in enumerate(delays, start=1):
             if delay > 0:
@@ -768,8 +783,8 @@ aggregate_score: {aggregate_score}
                     f"retrying in {delay}s after: {last_exc}"
                 )
                 await asyncio.sleep(delay)
-            # Reduce content on the second attempt (retry)
-            content_scale = LLM_CONTENT_SCALE_ON_SECOND_RETRY if attempt == 2 else 1.0
+            # Reduce content on retry attempts to stay within token limits
+            content_scale = scale_on_retry if attempt > 1 else 1.0
             if content_scale < 1.0:
                 logger.info(
                     f"[ORCHESTRATOR] {domain_slug} attempt {attempt} — "

@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -13,19 +14,27 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     auth_service = AuthService(db)
     user = auth_service.authenticate_user(form_data.username, form_data.password)
-    
+
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
+    if hasattr(user, 'is_active') and not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    # Stamp last login
+    if hasattr(user, 'last_login_at'):
+        user.last_login_at = datetime.utcnow()
+        db.commit()
+
     access_token = create_access_token(data={"sub": str(user.id), "role": user.role})
-    
+
     return Token(
         access_token=access_token,
         token_type="bearer",
         user={
             "id": str(user.id),
             "email": user.email,
-            "name": user.email.split('@')[0],  # Use email prefix as name
+            "name": user.email.split('@')[0],
             "role": user.role
         }
     )

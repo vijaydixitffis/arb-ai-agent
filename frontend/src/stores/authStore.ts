@@ -73,7 +73,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     if (error) throw error
 
-    const role = data.user.user_metadata?.role || 'solution_architect'
+    // Resolve role from public.users by email (handles seeded users whose
+    // Supabase auth user_metadata.role may not be set correctly).
+    let role: string = data.user.user_metadata?.role || 'solution_architect'
+    try {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role')
+        .eq('email', data.user.email)
+        .maybeSingle()
+      if (profile?.role) role = profile.role
+    } catch {
+      // Keep the user_metadata fallback role
+    }
+
     recordActivity()
     set({
       user: {
@@ -116,7 +129,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { data: { session } } = await supabase.auth.getSession()
 
       if (session?.user) {
-        const role = session.user.user_metadata?.role || 'solution_architect'
+        let role: string = session.user.user_metadata?.role || 'solution_architect'
+        try {
+          const { data: profile } = await supabase
+            .from('users')
+            .select('role')
+            .eq('email', session.user.email)
+            .maybeSingle()
+          if (profile?.role) role = profile.role
+        } catch {
+          // Keep the user_metadata fallback role
+        }
+
         recordActivity()
         set({
           user: {

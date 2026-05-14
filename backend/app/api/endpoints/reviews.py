@@ -522,7 +522,7 @@ async def update_review(review_id: str, review_data: dict, current_user: tuple =
             logger.warning(f"Review update form validation warnings: {form_validation.warnings}")
 
     # Role-based update authorisation
-    if user_role in ['enterprise_architect', 'arb_admin']:
+    if user_role in ['enterprise_architect', 'arb_admin', 'super_admin']:
         review = service.update_review(review_id, review_data)
         if not review:
             raise HTTPException(status_code=404, detail="Review not found")
@@ -565,7 +565,7 @@ async def approve_review(review_id: str, override_rationale: str = None, current
     user_id_token, user_role = current_user
     if not user_id_token:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user_role not in ['enterprise_architect', 'arb_admin']:
+    if user_role not in ['enterprise_architect', 'arb_admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="Only EA and ARB Admin can approve reviews")
     service = ReviewService(db)
     review = service.approve_review(review_id, override_rationale)
@@ -580,7 +580,7 @@ async def override_review(review_id: str, decision: str, rationale: str, current
     user_id_token, user_role = current_user
     if not user_id_token:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user_role not in ['enterprise_architect', 'arb_admin']:
+    if user_role not in ['enterprise_architect', 'arb_admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="Only EA and ARB Admin can override reviews")
     service = ReviewService(db)
     review = service.override_review(review_id, decision, rationale)
@@ -602,7 +602,7 @@ async def open_review_for_ea(
     user_id_token, user_role = current_user
     if not user_id_token:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user_role not in ['enterprise_architect', 'arb_admin']:
+    if user_role not in ['enterprise_architect', 'arb_admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="Only EA and ARB Admin can open reviews")
 
     review = db.query(Review).filter(Review.id == review_id).first()
@@ -637,7 +637,7 @@ async def submit_ea_decision(
     user_id_token, user_role = current_user
     if not user_id_token:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user_role not in ['enterprise_architect', 'arb_admin']:
+    if user_role not in ['enterprise_architect', 'arb_admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="Only EA and ARB Admin can submit EA decisions")
 
     ea_decision    = body.get("ea_decision")
@@ -755,7 +755,7 @@ async def create_ea_override(
     user_id_token, user_role = current_user
     if not user_id_token:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user_role not in ("enterprise_architect", "arb_admin"):
+    if user_role not in ('enterprise_architect', 'arb_admin', 'super_admin'):
         raise HTTPException(status_code=403, detail="Only EA or ARB Admin can create overrides")
 
     review = db.query(Review).filter(Review.id == review_id).first()

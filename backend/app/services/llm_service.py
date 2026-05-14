@@ -13,7 +13,10 @@ import re
 import asyncio
 from typing import Dict, Any, Optional
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
+from app.core.db_config import db_config
 from openai import AsyncOpenAI, RateLimitError
 from google import genai
 from google.genai import types as genai_types
@@ -25,30 +28,44 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class LLMService:
-    """Unified LLM service — OpenAI, Gemini, or OpenRouter, configured via LLM_PROVIDER setting."""
+    """Unified LLM service — OpenAI, Gemini, or OpenRouter.
+
+    Provider and model are resolved at *call time* from system_config (DB),
+    falling back to .env / Settings defaults so that admin UI changes take
+    effect immediately without a process restart.
+
+    All provider clients are initialised eagerly so any provider can be
+    activated at runtime without restarting the server.
+    """
 
     def __init__(self):
+        # Startup provider (used only when no DB session is available)
         self.provider = settings.LLM_PROVIDER.lower()
 
-        if self.provider == "openai":
-            self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        elif self.provider == "gemini":
+        # Initialise all clients whose keys are present so switching providers
+        # at runtime doesn't require a restart.
+        self.gemini_client: Optional[genai.Client] = None
+        self.openai_client: Optional[AsyncOpenAI] = None
+        self.openrouter_client: Optional[AsyncOpenAI] = None
+        self._has_gemini_fallback = False
+
+        if settings.GEMINI_API_KEY:
             self.gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        elif self.provider == "openrouter":
-            if not settings.OPENROUTER_API_KEY:
-                raise ValueError("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter")
+
+        if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "your_openai_api_key_here":
+            self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+        if settings.OPENROUTER_API_KEY:
             self.openrouter_client = AsyncOpenAI(
                 api_key=settings.OPENROUTER_API_KEY,
                 base_url=OPENROUTER_BASE_URL,
             )
-            # Gemini fallback: used automatically when OpenRouter returns 429
-            if settings.GEMINI_API_KEY:
-                self.gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-                self._has_gemini_fallback = True
-            else:
-                self._has_gemini_fallback = False
-        else:
-            raise ValueError(f"Unsupported LLM provider: {self.provider}")
+            self._has_gemini_fallback = self.gemini_client is not None
+
+    def _resolve_provider(self, db: Optional[Session]) -> str:
+        """Return the effective provider, reading from DB when available."""
+        raw = db_config(db, "llm.provider", settings.LLM_PROVIDER) if db else settings.LLM_PROVIDER
+        return str(raw).lower()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -59,21 +76,27 @@ class LLMService:
         temperature: float = 0.3,
         max_tokens: int = 8192,
         timeout: int = 120,
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
-        """Generate a JSON-mode completion via the configured LLM provider."""
+        """Generate a JSON-mode completion via the configured LLM provider.
+
+        Pass *db* to resolve provider and model names from system_config at
+        call time (admin UI changes take effect without a restart).
+        """
+        provider = self._resolve_provider(db)
         logger.info(
-            f"[LLM] generate_completion provider={self.provider} "
+            f"[LLM] generate_completion provider={provider} "
             f"prompt_len={len(prompt)} system_len={len(system_prompt or '')}"
         )
         try:
-            if self.provider == "openai":
-                coro = self._openai_completion(prompt, system_prompt, temperature, max_tokens)
-            elif self.provider == "gemini":
-                coro = self._gemini_completion(prompt, system_prompt, temperature, max_tokens)
-            elif self.provider == "openrouter":
-                coro = self._openrouter_completion(prompt, system_prompt, temperature, max_tokens)
+            if provider == "openai":
+                coro = self._openai_completion(prompt, system_prompt, temperature, max_tokens, db)
+            elif provider == "gemini":
+                coro = self._gemini_completion(prompt, system_prompt, temperature, max_tokens, db)
+            elif provider == "openrouter":
+                coro = self._openrouter_completion(prompt, system_prompt, temperature, max_tokens, db)
             else:
-                raise ValueError(f"Unsupported LLM provider: {self.provider}")
+                raise ValueError(f"Unsupported LLM provider: {provider}")
 
             result = await asyncio.wait_for(coro, timeout=timeout)
             logger.info(f"[LLM] OK tokens_used={result.get('tokens_used', 0)}")
@@ -81,15 +104,15 @@ class LLMService:
 
         except asyncio.TimeoutError:
             raise RuntimeError(f"LLM request timed out after {timeout}s")
-        except RateLimitError as exc:
-            if self.provider == "openrouter" and self._has_gemini_fallback:
+        except RateLimitError:
+            if provider == "openrouter" and self._has_gemini_fallback:
                 logger.warning(
                     f"[LLM] OpenRouter 429 rate-limit — falling back to Gemini "
-                    f"(model={settings.GEMINI_MODEL})"
+                    f"(model={db_config(db, 'llm.gemini_model', settings.GEMINI_MODEL)})"
                 )
                 try:
                     result = await asyncio.wait_for(
-                        self._gemini_completion(prompt, system_prompt, temperature, max_tokens),
+                        self._gemini_completion(prompt, system_prompt, temperature, max_tokens, db),
                         timeout=timeout,
                     )
                     logger.info(f"[LLM] Gemini fallback OK tokens_used={result.get('tokens_used', 0)}")
@@ -137,23 +160,25 @@ class LLMService:
         system_prompt: Optional[str],
         temperature: float,
         max_tokens: int,
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
+        model = str(db_config(db, "llm.openai_model", settings.OPENAI_MODEL))
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
         response = await self.openai_client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            response_format={"type": "json_object"},  # enforce JSON output
+            response_format={"type": "json_object"},
         )
         return {
             "content": response.choices[0].message.content,
             "tokens_used": response.usage.total_tokens if response.usage else 0,
-            "model": settings.OPENAI_MODEL,
+            "model": model,
             "provider": "openai",
         }
 
@@ -172,6 +197,7 @@ class LLMService:
         system_prompt: Optional[str],
         temperature: float,
         max_tokens: int,
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
         """Call OpenRouter (OpenAI-compatible) using the configured model."""
         messages = []
@@ -179,7 +205,7 @@ class LLMService:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        model = settings.OPENROUTER_MODEL
+        model = str(db_config(db, "llm.openrouter_model", settings.OPENROUTER_MODEL))
         logger.info(f"[LLM-OPENROUTER] calling model={model}")
 
         response = await self.openrouter_client.chat.completions.create(
@@ -217,10 +243,12 @@ class LLMService:
         system_prompt: Optional[str],
         temperature: float,
         max_tokens: int,
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
         """Call Gemini with system_instruction separate from user content,
         and response_mime_type='application/json' to force structured output."""
 
+        model = str(db_config(db, "llm.gemini_model", settings.GEMINI_MODEL))
         config = genai_types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=max_tokens,
@@ -228,9 +256,9 @@ class LLMService:
             system_instruction=system_prompt or "",
         )
 
-        logger.info(f"[LLM-GEMINI] calling model={settings.GEMINI_MODEL}")
+        logger.info(f"[LLM-GEMINI] calling model={model}")
         response = await self.gemini_client.aio.models.generate_content(
-            model=settings.GEMINI_MODEL,
+            model=model,
             contents=prompt,   # user content only — system goes in config
             config=config,
         )
@@ -262,7 +290,7 @@ class LLMService:
         return {
             "content": content,
             "tokens_used": tokens_used,
-            "model": settings.GEMINI_MODEL,
+            "model": model,
             "provider": "gemini",
         }
 
